@@ -71,6 +71,30 @@
     }
   }
 
+  async function requestPasswordRecovery(email,redirectTo){
+    const client = getClient();
+    if(!client)return { data:null, error:new Error('Supabase indisponivel no navegador.') };
+    try{
+      return await client.auth.resetPasswordForEmail(email,{
+        redirectTo,
+      });
+    }catch(error){
+      return { data:null, error };
+    }
+  }
+
+  async function updateUserPassword(newPassword){
+    const client = getClient();
+    if(!client)return { data:null, error:new Error('Supabase indisponivel no navegador.') };
+    try{
+      return await client.auth.updateUser({
+        password:newPassword,
+      });
+    }catch(error){
+      return { data:null, error };
+    }
+  }
+
   async function listByEmpresa(table,empresaId,options){
     const client = getClient();
     if(!client||!table||!empresaId)return { data:null, error:new Error('Parâmetros inválidos para consulta.') };
@@ -136,6 +160,8 @@
     signInWithPassword,
     signUp,
     signOut,
+    requestPasswordRecovery,
+    updateUserPassword,
     listByEmpresa,
     createByEmpresa,
     updateById,

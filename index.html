@@ -573,7 +573,19 @@ let S = {
   currentUser:null,
   companyId:null,
   loginView:'login',
+  authRecovery:{
+    requestLoading:false,
+    requestMessage:'',
+    requestError:'',
+    resetLoading:false,
+    resetMessage:'',
+    resetError:'',
+    canReset:false,
+  },
 };
+
+const PASSWORD_MIN_LEN=8;
+const RESET_PASSWORD_ROUTE='/reset-password';
 
 // ═══════════════════════════════════════════════════════════
 // CRYPTO / HASH
@@ -626,6 +638,158 @@ function saveDB(){
 async function bootstrapSupabaseBridge(){
   if(!window.EventProSupabase)return;
   await window.EventProSupabase.refreshSession();
+}
+
+function isResetPasswordRoute(){
+  const normalized=(window.location.pathname||'/').replace(/\/+$/,'')||'/';
+  return normalized===RESET_PASSWORD_ROUTE;
+}
+
+function setPublicRoute(path){
+  const target=String(path||'/');
+  if(window.location.pathname!==target){
+    window.history.replaceState({},'',target);
+  }
+}
+
+function hasRecoveryHintInUrl(){
+  const query=window.location.search||'';
+  const hash=window.location.hash||'';
+  return /(^|[?&#])type=recovery([&#]|$)/i.test(query)||/(^|[?&#])type=recovery([&#]|$)/i.test(hash);
+}
+
+function syncAuthRecoveryRouteFromLocation(){
+  if(!isResetPasswordRoute())return;
+  S.in=false;
+  S.page='login';
+  S.loginView='reset-password';
+  const persisted=sessionStorage.getItem('eventpro_pwd_recovery_ready')==='1';
+  if(persisted||hasRecoveryHintInUrl()){
+    S.authRecovery.canReset=true;
+  }
+}
+
+function goToLoginView(){
+  S.loginView='login';
+  S.authRecovery.requestError='';
+  S.authRecovery.requestMessage='';
+  S.authRecovery.resetError='';
+  S.authRecovery.resetMessage='';
+  if(isResetPasswordRoute())setPublicRoute('/');
+  render();
+}
+
+function openForgotPasswordView(){
+  S.loginView='forgot-password';
+  S.authRecovery.requestError='';
+  S.authRecovery.requestMessage='';
+  if(isResetPasswordRoute())setPublicRoute('/');
+  render();
+}
+
+async function requestPasswordRecovery(){
+  const email=(document.getElementById('recover-email')?.value||'').trim().toLowerCase();
+  if(!email||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){
+    S.authRecovery.requestError='Informe um e-mail válido para continuar.';
+    S.authRecovery.requestMessage='';
+    render();
+    return;
+  }
+
+  const neutralMessage='Se o e-mail estiver cadastrado, você receberá instruções para redefinir sua senha.';
+  S.authRecovery.requestLoading=true;
+  S.authRecovery.requestError='';
+  S.authRecovery.requestMessage='';
+  render();
+
+  try{
+    const redirectTo=`${window.location.origin}${RESET_PASSWORD_ROUTE}`;
+    if(window.EventProSupabase?.requestPasswordRecovery){
+      const res=await window.EventProSupabase.requestPasswordRecovery(email,redirectTo);
+      if(res?.error)console.warn('Falha no resetPasswordForEmail (mensagem neutra exibida):',res.error);
+    }else{
+      console.warn('EventProSupabase indisponível para recuperação de senha.');
+    }
+    S.authRecovery.requestMessage=neutralMessage;
+  }catch(error){
+    console.warn('Erro inesperado ao solicitar recuperação:',error);
+    S.authRecovery.requestMessage=neutralMessage;
+  }finally{
+    S.authRecovery.requestLoading=false;
+    render();
+  }
+}
+
+async function updatePasswordFromRecovery(){
+  const newPassword=(document.getElementById('reset-password-new')?.value||'').trim();
+  const confirmPassword=(document.getElementById('reset-password-confirm')?.value||'').trim();
+
+  if(!S.authRecovery.canReset){
+    S.authRecovery.resetError='Abra este formulário a partir do link de recuperação enviado por e-mail.';
+    S.authRecovery.resetMessage='';
+    render();
+    return;
+  }
+  if(newPassword.length<PASSWORD_MIN_LEN){
+    S.authRecovery.resetError=`A senha deve ter no mínimo ${PASSWORD_MIN_LEN} caracteres.`;
+    S.authRecovery.resetMessage='';
+    render();
+    return;
+  }
+  if(newPassword!==confirmPassword){
+    S.authRecovery.resetError='As senhas não conferem.';
+    S.authRecovery.resetMessage='';
+    render();
+    return;
+  }
+
+  S.authRecovery.resetLoading=true;
+  S.authRecovery.resetError='';
+  S.authRecovery.resetMessage='';
+  render();
+
+  try{
+    if(!window.EventProSupabase?.updateUserPassword){
+      throw new Error('EventProSupabase indisponível para atualização de senha.');
+    }
+    const res=await window.EventProSupabase.updateUserPassword(newPassword);
+    if(res?.error)throw res.error;
+
+    S.authRecovery.canReset=false;
+    S.authRecovery.resetMessage='Senha atualizada com sucesso. Faça login com a nova senha.';
+    sessionStorage.removeItem('eventpro_pwd_recovery_ready');
+
+    const p1=document.getElementById('reset-password-new');
+    const p2=document.getElementById('reset-password-confirm');
+    if(p1)p1.value='';
+    if(p2)p2.value='';
+
+    setTimeout(()=>{
+      S.loginView='login';
+      setPublicRoute('/');
+      render();
+    },1200);
+  }catch(error){
+    console.error('Erro ao atualizar senha:',error);
+    S.authRecovery.resetError='Não foi possível atualizar sua senha. Solicite um novo link e tente novamente.';
+  }finally{
+    S.authRecovery.resetLoading=false;
+    render();
+  }
+}
+
+function handleSupabaseAuthEvent(ev){
+  const authEvent=ev?.detail?.event;
+  if(authEvent!=='PASSWORD_RECOVERY')return;
+  sessionStorage.setItem('eventpro_pwd_recovery_ready','1');
+  S.in=false;
+  S.page='login';
+  S.loginView='reset-password';
+  S.authRecovery.canReset=true;
+  S.authRecovery.resetError='';
+  S.authRecovery.resetMessage='Defina sua nova senha para concluir a recuperação.';
+  if(!isResetPasswordRoute())setPublicRoute(RESET_PASSWORD_ROUTE);
+  render();
 }
 
 function loadDB(){
@@ -4922,6 +5086,49 @@ function renderModal(){
 // LOGIN
 // ═══════════════════════════════════════════════════════════
 function renderLogin(){
+  if(S.loginView==='forgot-password'){
+    const loading=S.authRecovery.requestLoading;
+    const helper=S.authRecovery.requestMessage
+      ?`<div style="background:var(--gbg);border:1px solid var(--green);color:var(--green);border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:12px;">${esc(S.authRecovery.requestMessage)}</div>`
+      :(S.authRecovery.requestError
+        ?`<div style="background:var(--rbg);border:1px solid var(--red);color:var(--red);border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:12px;">${esc(S.authRecovery.requestError)}</div>`
+        :'');
+    return`<div class="login-wrap"><div class="login-card">
+  <div class="login-logo">
+    <div class="login-ico">EP</div>
+    <div style="font-family:var(--fh);font-size:22px;font-weight:800;">Recuperar Senha</div>
+    <div style="color:var(--text2);font-size:13px;margin-top:4px;">Digite seu e-mail para receber o link de recuperação</div>
+  </div>
+  ${helper}
+  <div class="fg"><label class="fl">E-mail</label><input class="fc" type="email" id="recover-email" placeholder="seuemail@empresa.com" ${loading?'disabled':''}></div>
+  <button class="btn btn-primary" style="width:100%;justify-content:center;padding:11px;font-size:14px;" onclick="requestPasswordRecovery()" ${loading?'disabled':''}>${loading?'Enviando...':'Enviar link de recuperação'}</button>
+  <div style="text-align:center;margin-top:14px;font-size:12px;color:var(--text2);">Lembrou sua senha? <span style="color:var(--accent2);cursor:pointer;font-weight:600;" onclick="goToLoginView()">Fazer login</span></div>
+  </div></div>`;
+  }
+
+  if(S.loginView==='reset-password'){
+    const loading=S.authRecovery.resetLoading;
+    const canReset=!!S.authRecovery.canReset;
+    const helper=S.authRecovery.resetMessage
+      ?`<div style="background:var(--gbg);border:1px solid var(--green);color:var(--green);border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:12px;">${esc(S.authRecovery.resetMessage)}</div>`
+      :(S.authRecovery.resetError
+        ?`<div style="background:var(--rbg);border:1px solid var(--red);color:var(--red);border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:12px;">${esc(S.authRecovery.resetError)}</div>`
+        :'');
+    return`<div class="login-wrap"><div class="login-card">
+  <div class="login-logo">
+    <div class="login-ico">EP</div>
+    <div style="font-family:var(--fh);font-size:22px;font-weight:800;">Redefinir Senha</div>
+    <div style="color:var(--text2);font-size:13px;margin-top:4px;">Crie uma nova senha para sua conta</div>
+  </div>
+  ${helper}
+  ${!canReset?`<div style="background:var(--abg);border:1px solid var(--amber);color:var(--amber);border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:12px;">Abra esta página pelo link enviado no e-mail de recuperação.</div>`:''}
+  <div class="fg"><label class="fl">Nova senha</label><input class="fc" type="password" id="reset-password-new" placeholder="Mínimo ${PASSWORD_MIN_LEN} caracteres" ${loading||!canReset?'disabled':''}></div>
+  <div class="fg"><label class="fl">Confirmar nova senha</label><input class="fc" type="password" id="reset-password-confirm" placeholder="Repita a senha" ${loading||!canReset?'disabled':''}></div>
+  <button class="btn btn-primary" style="width:100%;justify-content:center;padding:11px;font-size:14px;" onclick="updatePasswordFromRecovery()" ${loading||!canReset?'disabled':''}>${loading?'Atualizando...':'Atualizar senha'}</button>
+  <div style="text-align:center;margin-top:14px;font-size:12px;color:var(--text2);">Voltar para o login? <span style="color:var(--accent2);cursor:pointer;font-weight:600;" onclick="goToLoginView()">Ir para login</span></div>
+  </div></div>`;
+  }
+
   if(S.loginView==='register'){
     return`<div class="login-wrap"><div class="login-card" style="max-width:420px;">
   <div class="login-logo">
@@ -4956,7 +5163,7 @@ function renderLogin(){
   <div class="fg"><label class="fl">Email</label><input class="fc" type="email" id="lemail" value="rafael@eventpro.com"></div>
   <div class="fg"><label class="fl">Senha</label><input class="fc" type="password" id="lpass" value="123456"></div>
   <div style="font-size:11px;color:var(--text3);margin:-4px 0 10px;">Perfis de teste: admin/manager/employee (senha padrão: 123456)</div>
-  <div style="display:flex;justify-content:flex-end;margin-bottom:18px;"><span style="font-size:12px;color:var(--accent2);cursor:pointer;" onclick="toast('Email de recuperação enviado! 📧','ok')">Esqueci a senha</span></div>
+  <div style="display:flex;justify-content:flex-end;margin-bottom:18px;"><span style="font-size:12px;color:var(--accent2);cursor:pointer;" onclick="openForgotPasswordView()">Esqueci a senha</span></div>
   <button class="btn btn-primary" style="width:100%;justify-content:center;padding:11px;font-size:14px;" onclick="doLogin()">Entrar no EventPro</button>
   <div style="text-align:center;margin-top:14px;font-size:12px;color:var(--text2);">Não tem conta? <span style="color:var(--accent2);cursor:pointer;font-weight:600;" onclick="S.loginView='register';render()">Criar conta gratuita</span></div>
   <div style="text-align:center;margin-top:10px;font-size:11.5px;color:var(--text3);">EventPro v2.0 · SaaS para Produtoras de Eventos</div>
@@ -5096,6 +5303,12 @@ self.addEventListener('fetch',e=>e.respondWith(caches.match(e.request).then(r=>r
 
 // Init
 loadDB();
+window.addEventListener('eventpro:supabase-auth',handleSupabaseAuthEvent);
+window.addEventListener('popstate',()=>{
+  syncAuthRecoveryRouteFromLocation();
+  render();
+});
+syncAuthRecoveryRouteFromLocation();
 render();
 bootstrapSupabaseBridge();
 </script>

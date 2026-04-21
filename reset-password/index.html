@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Redefinir Senha - EventPro</title>
+<style>
+:root{--bg:#0b0f1a;--card:#111827;--border:rgba(255,255,255,.1);--text:#eef2ff;--muted:#94a3b8;--accent:#6366f1;--ok:#10b981;--err:#ef4444;--warn:#f59e0b;}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;}
+.card{width:min(420px,100%);background:var(--card);border:1px solid var(--border);border-radius:14px;padding:24px;}
+h1{font-size:22px;margin-bottom:6px;}
+.sub{color:var(--muted);font-size:14px;margin-bottom:14px;}
+.group{margin-bottom:12px;}
+label{display:block;font-size:13px;color:var(--muted);margin-bottom:6px;}
+input{width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:#1f2937;color:var(--text);font-size:14px;outline:none;}
+input:focus{border-color:var(--accent);}
+button{width:100%;padding:11px 14px;border:none;border-radius:10px;background:var(--accent);color:#fff;font-weight:600;font-size:14px;cursor:pointer;}
+button:disabled{opacity:.65;cursor:not-allowed;}
+.msg{font-size:13px;border-radius:10px;padding:10px 12px;margin-bottom:12px;}
+.msg-ok{border:1px solid var(--ok);color:var(--ok);background:rgba(16,185,129,.08);}
+.msg-err{border:1px solid var(--err);color:var(--err);background:rgba(239,68,68,.08);}
+.msg-warn{border:1px solid var(--warn);color:var(--warn);background:rgba(245,158,11,.08);}
+.foot{margin-top:12px;text-align:center;font-size:13px;color:var(--muted);}
+.foot a{color:#a5b4fc;text-decoration:none;}
+</style>
+</head>
+<body>
+<main class="card">
+  <h1>Redefinir senha</h1>
+  <p class="sub">Crie uma nova senha para acessar sua conta.</p>
+  <div id="message"></div>
+  <form id="reset-form">
+    <div class="group">
+      <label for="new-password">Nova senha</label>
+      <input id="new-password" type="password" autocomplete="new-password" placeholder="Mínimo 8 caracteres" required>
+    </div>
+    <div class="group">
+      <label for="confirm-password">Confirmar nova senha</label>
+      <input id="confirm-password" type="password" autocomplete="new-password" placeholder="Repita a senha" required>
+    </div>
+    <button id="submit-btn" type="submit" disabled>Atualizar senha</button>
+  </form>
+  <div class="foot"><a href="/">Voltar para login</a></div>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../eventpro-supabase.js"></script>
+<script>
+(function(){
+  const PASSWORD_MIN_LEN = 8;
+  const state = {
+    loading:false,
+    canReset:false,
+  };
+
+  const messageEl = document.getElementById('message');
+  const formEl = document.getElementById('reset-form');
+  const newPasswordEl = document.getElementById('new-password');
+  const confirmPasswordEl = document.getElementById('confirm-password');
+  const submitBtn = document.getElementById('submit-btn');
+
+  function setMessage(type,text){
+    if(!text){
+      messageEl.innerHTML='';
+      return;
+    }
+    const cls = type==='ok'?'msg-ok':(type==='warn'?'msg-warn':'msg-err');
+    messageEl.innerHTML = '<div class="msg '+cls+'">'+String(text).replace(/[<>&"']/g,s=>({
+      '<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'
+    }[s]))+'</div>';
+  }
+
+  function updateUI(){
+    submitBtn.disabled = state.loading || !state.canReset;
+    newPasswordEl.disabled = state.loading || !state.canReset;
+    confirmPasswordEl.disabled = state.loading || !state.canReset;
+    submitBtn.textContent = state.loading ? 'Atualizando...' : 'Atualizar senha';
+  }
+
+  function markRecoveryReady(){
+    state.canReset = true;
+    sessionStorage.setItem('eventpro_pwd_recovery_ready','1');
+    setMessage('warn','Fluxo de recuperação detectado. Defina sua nova senha.');
+    updateUI();
+  }
+
+  function hasRecoveryHintInUrl(){
+    const query = window.location.search || '';
+    const hash = window.location.hash || '';
+    return /(^|[?&#])type=recovery([&#]|$)/i.test(query) || /(^|[?&#])type=recovery([&#]|$)/i.test(hash);
+  }
+
+  window.addEventListener('eventpro:supabase-auth',function(ev){
+    if(ev && ev.detail && ev.detail.event==='PASSWORD_RECOVERY'){
+      markRecoveryReady();
+    }
+  });
+
+  formEl.addEventListener('submit',async function(event){
+    event.preventDefault();
+
+    if(!state.canReset){
+      setMessage('err','Abra esta página pelo link de recuperação enviado por e-mail.');
+      return;
+    }
+
+    const newPassword = String(newPasswordEl.value||'').trim();
+    const confirmPassword = String(confirmPasswordEl.value||'').trim();
+
+    if(newPassword.length < PASSWORD_MIN_LEN){
+      setMessage('err','A senha deve ter no mínimo '+PASSWORD_MIN_LEN+' caracteres.');
+      return;
+    }
+    if(newPassword !== confirmPassword){
+      setMessage('err','As senhas não conferem.');
+      return;
+    }
+
+    state.loading = true;
+    setMessage('', '');
+    updateUI();
+
+    try{
+      if(!window.EventProSupabase || !window.EventProSupabase.updateUserPassword){
+        throw new Error('Supabase indisponível.');
+      }
+      const response = await window.EventProSupabase.updateUserPassword(newPassword);
+      if(response && response.error)throw response.error;
+
+      sessionStorage.removeItem('eventpro_pwd_recovery_ready');
+      state.canReset = false;
+      setMessage('ok','Senha atualizada com sucesso. Você já pode voltar e fazer login.');
+      formEl.reset();
+      setTimeout(function(){
+        window.location.href = '/';
+      },1300);
+    }catch(err){
+      console.error('Erro ao atualizar senha:',err);
+      setMessage('err','Não foi possível atualizar a senha. Solicite um novo link e tente novamente.');
+    }finally{
+      state.loading = false;
+      updateUI();
+    }
+  });
+
+  (async function init(){
+    const persisted = sessionStorage.getItem('eventpro_pwd_recovery_ready') === '1';
+    if(persisted || hasRecoveryHintInUrl()){
+      state.canReset = true;
+    }
+
+    try{
+      if(window.EventProSupabase && window.EventProSupabase.refreshSession){
+        await window.EventProSupabase.refreshSession();
+      }
+    }catch(err){
+      console.warn('Falha ao atualizar sessão para recovery:',err);
+    }
+
+    if(state.canReset){
+      setMessage('warn','Valide sua nova senha para concluir a recuperação.');
+    }else{
+      setMessage('warn','Abra esta página pelo link de recuperação enviado por e-mail.');
+    }
+    updateUI();
+  })();
+})();
+</script>
+</body>
+</html>
