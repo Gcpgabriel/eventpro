@@ -935,8 +935,15 @@ function exportClientsMaskedCSV(){
 function openContractDoc(eventId){
   const ev=DB.events.find(e=>e.id===eventId);
   if(!ev){toast('Evento não encontrado.','err');return;}
+  const co=DB.company||{};
+  const companyName=co.name||'Empresa';
+  const companyOwner=co.owner||'Responsável';
+  const companyCnpj=co.cnpj||'—';
+  const companyAddress=co.address||'—';
+  const companyPhone=co.phone||'—';
+  const companyEmail=co.email||'';
 
-  const sigSvg=`<svg xmlns="http://www.w3.org/2000/svg" width="420" height="90" viewBox="0 0 420 90"><rect width="100%" height="100%" fill="white"/><text x="12" y="58" font-family="cursive" font-size="36" fill="#111827">Carlos Henrique Souza De Paula</text></svg>`;
+  const sigSvg=`<svg xmlns="http://www.w3.org/2000/svg" width="420" height="90" viewBox="0 0 420 90"><rect width="100%" height="100%" fill="white"/><text x="12" y="58" font-family="cursive" font-size="36" fill="#111827">${esc(companyOwner)}</text></svg>`;
   const sigUri='data:image/svg+xml;charset=UTF-8,'+encodeURIComponent(sigSvg);
 
   const html=`<!DOCTYPE html>
@@ -980,19 +987,19 @@ function openContractDoc(eventId){
   <article class="doc">
     <header class="head">
       <div>
-        <div class="brand">MAIS EVENTOS</div>
+        <div class="brand">${esc(companyName)}</div>
         <div class="brand-sub">Som . Iluminacao . Estrutura</div>
       </div>
       <div class="company">
-        CNPJ: 62.275.174/0001-14<br>
-        Rua Daniel da Cunha Telles, QD 18 Lt 11A - Res. Arco-Iris<br>
-        Anapolis, Goias - CEP 75106-395
+        CNPJ: ${esc(companyCnpj)}<br>
+        ${esc(companyAddress)}<br>
+        ${esc(companyPhone)}${companyEmail?`<br>${esc(companyEmail)}`:''}
       </div>
     </header>
 
     <section class="content">
       <h1>CONTRATO DE PRESTACAO DE SERVICOS</h1>
-      <p>Pelo presente instrumento particular, de um lado, <strong>MAIS EVENTOS</strong>, representada por <strong>Carlos Henrique Souza De Paula</strong>, inscrita no CNPJ sob o n. <strong>62.275.174/0001-14</strong>, doravante denominada <strong>CONTRATADA</strong>, e de outro lado, <strong>${esc(ev.client)}</strong>, doravante denominado(a) <strong>CONTRATANTE</strong>, resolvem firmar o presente contrato, mediante as clausulas e condicoes abaixo.</p>
+      <p>Pelo presente instrumento particular, de um lado, <strong>${esc(companyName)}</strong>, representada por <strong>${esc(companyOwner)}</strong>, inscrita no CNPJ sob o n. <strong>${esc(companyCnpj)}</strong>, doravante denominada <strong>CONTRATADA</strong>, e de outro lado, <strong>${esc(ev.client)}</strong>, doravante denominado(a) <strong>CONTRATANTE</strong>, resolvem firmar o presente contrato, mediante as clausulas e condicoes abaixo.</p>
 
       <div class="meta">
         <div><strong>Evento:</strong> ${esc(ev.name)}</div>
@@ -1025,11 +1032,11 @@ function openContractDoc(eventId){
 
       <div class="signatures">
         <div class="sig">
-          <div class="sig-img"><img src="${sigUri}" alt="Assinatura Carlos Henrique Souza De Paula"></div>
+          <div class="sig-img"><img src="${sigUri}" alt="Assinatura ${esc(companyOwner)}"></div>
           <div class="line">
-            <strong>MAIS EVENTOS</strong><br>
-            Carlos Henrique Souza De Paula<br>
-            CNPJ: 62.275.174/0001-14
+            <strong>${esc(companyName)}</strong><br>
+            ${esc(companyOwner)}<br>
+            CNPJ: ${esc(companyCnpj)}
           </div>
         </div>
         <div class="sig">
@@ -1063,11 +1070,11 @@ function openContractDoc(eventId){
     </section>
 
     <footer class="footer">
-      <strong>MAIS EVENTOS</strong><br>
-      Carlos Henrique Souza De Paula<br>
-      CNPJ: 62.275.174/0001-14<br>
-      Rua Daniel da Cunha Telles, QD 18 Lt 11A - Res. Arco-Iris<br>
-      Anapolis, Goias - CEP 75106-395
+      <strong>${esc(companyName)}</strong><br>
+      ${esc(companyOwner)}<br>
+      CNPJ: ${esc(companyCnpj)}<br>
+      ${esc(companyAddress)}<br>
+      ${esc(companyPhone)}${companyEmail?` · ${esc(companyEmail)}`:''}
     </footer>
   </article>
 </body>
@@ -1092,6 +1099,7 @@ function downloadContract(contractId){
 
 function generateProposalPDF(p){
   if(!p){toast('Proposta não encontrada','err');return;}
+  const co=DB.company||{};
   const cl=DB.clients.find(c=>c.name===p.client);
   const nomeCLean=(p.event||'orcamento').replace(/[^a-zA-Z0-9]/g,'_').slice(0,30);
   const dataCriacao=new Date().toLocaleDateString('pt-BR');
@@ -1153,7 +1161,7 @@ p{margin:0 0 8px;text-align:justify;}
   <button class="tbtn share" onclick="(async()=>{try{await navigator.share({title:'Orçamento ${esc(p.event||'Evento')}',text:'Segue o orçamento de ${esc(p.client||'Cliente')} para ${esc(p.event||'evento')}.',url:location.href});}catch(e){if(e.name!=='AbortError'){navigator.clipboard.writeText(location.href).then(()=>alert('Link copiado!')).catch(()=>alert('Compartilhe manualmente após salvar como PDF.'));}}})()">📤 Compartilhar</button>
 </div>
 
-${logoB64?`<img class="top-logo" src="${logoB64}" alt="Mais Eventos">`:''}
+${logoB64?`<img class="top-logo" src="${logoB64}" alt="${esc(co.name||'Empresa')}">`:''}
 <div class="top-date">Anápolis-GO, ${dataCriacao}</div>
 
 <h1>O R Ç A M E N T O</h1>
@@ -1175,12 +1183,14 @@ ${logoB64?`<img class="top-logo" src="${logoB64}" alt="Mais Eventos">`:''}
 
 <div class="sign">
   <div class="line"></div>
-  <div>Carlos Henrique Souza de Paula</div>
+  <div>${esc(co.owner||'Responsável')}</div>
 </div>
 
 <div class="foot">
-  <div>CNPJ: 62.275.174/0001-14</div>
-  <div>Rua Daniel Cunha Telles q18 l11A, Residencial Arco Iris - Anápolis - GO.</div>
+  <div>${esc(co.name||'Empresa')}</div>
+  <div>CNPJ: ${esc(co.cnpj||'—')}</div>
+  <div>${esc(co.address||'—')}</div>
+  <div>${esc(co.phone||'—')}${co.email?` · ${esc(co.email)}`:''}</div>
 </div>
 </body>
 </html>`;
@@ -1248,7 +1258,7 @@ h1{font-size:13px;text-align:center;text-transform:uppercase;font-weight:bold;ma
   <button class="tbtn" onclick="window.print()">🖨️ Salvar como PDF</button>
   <button class="tbtn share" onclick="(async()=>{try{const r=await fetch(location.href);const b=await r.blob();const f=new File([b],'Contrato_${nomeCLean}.html',{type:'text/html'});if(navigator.canShare&&navigator.canShare({files:[f]})){await navigator.share({title:'Contrato ${esc(ev.name)}',files:[f]});return;}await navigator.share({title:'Contrato ${esc(ev.name)}',text:'Segue o contrato para o evento ${esc(ev.name)}. Abra no navegador e salve como PDF.'});}catch(e){if(e.name!=='AbortError'){navigator.clipboard.writeText(location.href).then(()=>alert('Link copiado! Cole no WhatsApp ou e-mail.')).catch(()=>alert('Para compartilhar: use Ctrl+P (Salvar como PDF) e então envie o arquivo.'));}}})()" >📤 Compartilhar</button>
 </div>
-<img src="${logoB64}" alt="Mais Eventos" style="display:block;max-width:140px;width:100%;margin:0 auto 14px;page-break-inside:avoid;">
+<img src="${logoB64}" alt="${esc(co.name||'Empresa')}" style="display:block;max-width:140px;width:100%;margin:0 auto 14px;page-break-inside:avoid;">
 
 <h1>CONTRATO DE PRESTAÇÃO DE SERVIÇOS E LOCAÇÃO DE EQUIPAMENTOS DE SOM E ILUMINAÇÃO</h1>
 
@@ -1285,7 +1295,7 @@ h1{font-size:13px;text-align:center;text-transform:uppercase;font-weight:bold;ma
 <div class="signatures">
   <div class="sig-block">
     <div class="sig-line"></div>
-    <div class="sig-name">Mais Eventos</div>
+    <div class="sig-name">${esc(co.name||'Empresa')}</div>
     <div class="sig-sub">CNPJ: ${co.cnpj}</div>
   </div>
   <div class="sig-block">
