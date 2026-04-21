@@ -406,6 +406,8 @@ let clists = {
 };
 
 const MT_TABLES=['events','equipment','clients','proposals','contracts','maintenance','consumables','objectivesPurchases','team','nps','auditLogs','paymentMethods','recurringExpenses'];
+const DEFAULT_END_CLIENT_NAME='Cliente Final';
+const DEFAULT_END_CLIENT_EMAIL='cliente.final@nao-informado.local';
 let DB_ALL=null;
 let CLISTS_ALL={};
 
@@ -433,6 +435,40 @@ function initialsFromName(name){
 function ensureEmpresaId(rows,empresaId){
   if(!Array.isArray(rows))return[];
   return rows.map(r=>({empresa_id:empresaId,...r,empresa_id:Number(r?.empresa_id||empresaId)}));
+}
+
+function buildDefaultEndClient(empresaId,nextClientId){
+  return {
+    id:Number(nextClientId),
+    name:DEFAULT_END_CLIENT_NAME,
+    type:'PF',
+    doc:'',
+    birth:'',
+    email:DEFAULT_END_CLIENT_EMAIL,
+    phone:'',
+    address:'',
+    events:0,
+    last:'',
+    value:0,
+    consent:true,
+    consentAt:new Date().toISOString(),
+    empresa_id:Number(empresaId||1),
+    isDefaultEndClient:true,
+  };
+}
+
+function ensureDefaultEndClientForCompanyInStore(store,empresaId){
+  if(!store)return;
+  const targetEmpresaId=Number(empresaId||1);
+  store.clients=Array.isArray(store.clients)?store.clients:[];
+  const existing=store.clients.find(c=>
+    Number(c?.empresa_id||1)===targetEmpresaId&&
+    (c?.isDefaultEndClient===true||String(c?.name||'').trim().toLowerCase()===DEFAULT_END_CLIENT_NAME.toLowerCase())
+  );
+  if(existing)return;
+
+  const nextClientId=(store.clients.length?Math.max(...store.clients.map(c=>Number(c?.id||0))):0)+1;
+  store.clients.push(buildDefaultEndClient(targetEmpresaId,nextClientId));
 }
 
 function normalizeFinanceEntry(entry,type){
@@ -504,6 +540,7 @@ function normalizeMultiTenantStore(data){
   store.finance.pay=ensureEmpresaId(store.finance.pay,1).map(r=>normalizeFinanceEntry(r,'pay'));
 
   store.companies=store.companies.map((c,idx)=>({id:Number(c.id||idx+1),...c}));
+  store.companies.forEach(c=>ensureDefaultEndClientForCompanyInStore(store,Number(c.id||1)));
   return store;
 }
 
@@ -525,6 +562,10 @@ function applyTenantScope(user){
   MT_TABLES.forEach(t=>{
     DB[t]=deepClone((DB_ALL[t]||[]).filter(r=>Number(r.empresa_id)===empresaId));
   });
+  if(!DB.clients.some(c=>c.isDefaultEndClient===true||String(c?.name||'').trim().toLowerCase()===DEFAULT_END_CLIENT_NAME.toLowerCase())){
+    ensureDefaultEndClientForCompanyInStore(DB_ALL,empresaId);
+    DB.clients=deepClone((DB_ALL.clients||[]).filter(r=>Number(r.empresa_id)===empresaId));
+  }
   DB.finance={
     rec:deepClone((DB_ALL.finance?.rec||[]).filter(r=>Number(r.empresa_id)===empresaId)),
     pay:deepClone((DB_ALL.finance?.pay||[]).filter(r=>Number(r.empresa_id)===empresaId)),
@@ -801,6 +842,10 @@ function loadDB(){
     const savedClistsAll=localStorage.getItem('eventpro_clists_all');
     const legacyClists=localStorage.getItem('eventpro_clists');
     CLISTS_ALL=normalizeClistsStore(savedClistsAll?JSON.parse(savedClistsAll):(legacyClists?JSON.parse(legacyClists):deepClone(clists)));
+
+    // Persiste a versão normalizada para manter consistência entre sessões/tenants.
+    localStorage.setItem('eventpro_db_all',JSON.stringify(DB_ALL));
+    localStorage.setItem('eventpro_clists_all',JSON.stringify(CLISTS_ALL));
 
     if(!Array.isArray(DB_ALL?.users)||!DB_ALL.users.length||!Array.isArray(DB_ALL?.companies)||!DB_ALL.companies.length){
       resetToDefaultStores();
@@ -5140,6 +5185,10 @@ function renderLogin(){
     <strong style="color:var(--text1);">🏢 Dados da Empresa</strong>
   </div>
   <div class="fg"><label class="fl">Nome da Empresa <span style="color:var(--red)">*</span></label><input class="fc" id="rEmpresa" placeholder="Ex: Som & Luz Produções Ltda"></div>
+  <div class="grid g2"><div class="fg"><label class="fl">CNPJ</label><input class="fc" id="rCnpj" placeholder="00.000.000/0001-00"></div><div class="fg"><label class="fl">Telefone</label><input class="fc" id="rPhone" placeholder="(00) 00000-0000"></div></div>
+  <div class="fg"><label class="fl">E-mail Comercial</label><input class="fc" type="email" id="rCompanyEmail" placeholder="contato@suaempresa.com"></div>
+  <div class="fg"><label class="fl">Endereço</label><input class="fc" id="rAddress" placeholder="Rua, número, cidade e UF"></div>
+  <div class="fg"><label class="fl">Especialidades</label><input class="fc" id="rSpecialties" placeholder="Som, Iluminação, Estrutura..."></div>
   <div class="fg"><label class="fl">Seu Nome Completo <span style="color:var(--red)">*</span></label><input class="fc" id="rNome" placeholder="Ex: Rafael Moura"></div>
   <div class="fg"><label class="fl">Email (login do admin) <span style="color:var(--red)">*</span></label><input class="fc" type="email" id="rEmail" placeholder="admin@suaempresa.com"></div>
   <div class="fg"><label class="fl">Senha <span style="color:var(--red)">*</span></label><input class="fc" type="password" id="rSenha" placeholder="Mínimo 6 caracteres"></div>
@@ -5211,6 +5260,11 @@ async function doLogin(){
 
 async function registerEmpresa(){
   const nomeEmpresa=(document.getElementById('rEmpresa')?.value||'').trim();
+  const companyCnpj=(document.getElementById('rCnpj')?.value||'').trim();
+  const companyPhone=(document.getElementById('rPhone')?.value||'').trim();
+  const companyContactEmail=(document.getElementById('rCompanyEmail')?.value||'').trim().toLowerCase();
+  const companyAddress=(document.getElementById('rAddress')?.value||'').trim();
+  const companySpecialties=(document.getElementById('rSpecialties')?.value||'').trim();
   const nomeAdmin=(document.getElementById('rNome')?.value||'').trim();
   const email=(document.getElementById('rEmail')?.value||'').trim().toLowerCase();
   const senha=(document.getElementById('rSenha')?.value||'').trim();
@@ -5220,6 +5274,7 @@ async function registerEmpresa(){
   if(!nomeEmpresa){toast('Informe o nome da empresa.','err');return;}
   if(!nomeAdmin){toast('Informe seu nome completo.','err');return;}
   if(!email||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){toast('Informe um email válido.','err');return;}
+  if(companyContactEmail&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(companyContactEmail)){toast('Informe um e-mail comercial válido.','err');return;}
   if(senha.length<6){toast('A senha deve ter pelo menos 6 caracteres.','err');return;}
   if(senha!==senha2){toast('As senhas não conferem.','err');return;}
   if(!lgpd){toast('Aceite os termos de uso de dados (LGPD) para continuar.','err');return;}
@@ -5237,7 +5292,16 @@ async function registerEmpresa(){
   const newUserId=nextId(DB_ALL.users||[{id:0}]);
   const pwdHash=await hashPassword(senha);
 
-  const newEmpresa={id:newEmpresaId,name:nomeEmpresa,owner:nomeAdmin,cnpj:'',address:'',phone:'',email,specialties:''};
+  const newEmpresa={
+    id:newEmpresaId,
+    name:nomeEmpresa,
+    owner:nomeAdmin,
+    cnpj:companyCnpj,
+    address:companyAddress,
+    phone:companyPhone,
+    email:companyContactEmail||email,
+    specialties:companySpecialties,
+  };
   const newAdmin={id:newUserId,name:nomeAdmin,email,role:'admin',empresa_id:newEmpresaId,initials:initialsFromName(nomeAdmin),passwordHash:pwdHash};
 
   DB_ALL.companies=DB_ALL.companies||[];
@@ -5247,6 +5311,7 @@ async function registerEmpresa(){
 
   // init empty tenant tables
   MT_TABLES.forEach(t=>{DB_ALL[t]=DB_ALL[t]||[];});
+  ensureDefaultEndClientForCompanyInStore(DB_ALL,newEmpresaId);
   if(!DB_ALL.finance){DB_ALL.finance={rec:[],pay:[]};}
 
   CLISTS_ALL[String(newEmpresaId)]={};
