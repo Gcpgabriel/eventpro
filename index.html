@@ -5082,6 +5082,7 @@ self.addEventListener('fetch',e=>e.respondWith(caches.match(e.request).then(r=>r
   const url=URL.createObjectURL(blob);
   navigator.serviceWorker.register(url).catch(()=>{});
 }
+<!--update-->
 
 // Init
 loadDB();
