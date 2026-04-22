@@ -179,6 +179,31 @@ button:disabled{opacity:.65;cursor:not-allowed;}
       const response = await window.EventProSupabase.updateUserPassword(newPassword);
       if(response && response.error)throw response.error;
 
+      // Sincroniza hash local para que o login com a nova senha funcione
+      try{
+        const clientRef = window.EventProSupabase.getClient && window.EventProSupabase.getClient();
+        const sessionRes = clientRef ? await clientRef.auth.getSession() : null;
+        const sessionEmail = sessionRes && sessionRes.data && sessionRes.data.session && sessionRes.data.session.user && sessionRes.data.session.user.email;
+        if(sessionEmail){
+          const rawDb = localStorage.getItem('eventpro_db_all');
+          const dbAll = rawDb ? JSON.parse(rawDb) : {};
+          if(Array.isArray(dbAll.users)){
+            const localUser = dbAll.users.find(function(u){ return String(u.email||'').toLowerCase() === sessionEmail.toLowerCase(); });
+            if(localUser){
+              const enc = new TextEncoder();
+              const buf = await crypto.subtle.digest('SHA-256', enc.encode(String(newPassword)));
+              const hash = Array.from(new Uint8Array(buf)).map(function(b){ return b.toString(16).padStart(2,'0'); }).join('');
+              localUser.passwordHash = hash;
+              localUser.password = '';
+              localUser.mustResetPassword = false;
+              localStorage.setItem('eventpro_db_all', JSON.stringify(dbAll));
+            }
+          }
+        }
+      }catch(syncErr){
+        console.warn('Sync hash local falhou (não crítico):',syncErr);
+      }
+
       await new Promise(r=>setTimeout(r,800));
       sessionStorage.removeItem('eventpro_pwd_recovery_ready');
       state.canReset = false;

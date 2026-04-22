@@ -986,6 +986,24 @@ async function updatePasswordFromRecovery(){
     const res=await window.EventProSupabase.updateUserPassword(newPassword);
     if(res?.error)throw res.error;
 
+    // Sincroniza hash local para que o login com a nova senha funcione
+    try{
+      const clientRef=window.EventProSupabase.getClient?.();
+      const sessionRes=clientRef?await clientRef.auth.getSession():null;
+      const sessionEmail=sessionRes?.data?.session?.user?.email;
+      if(sessionEmail&&DB_ALL?.users){
+        const localUserByEmail=(DB_ALL.users).find(u=>String(u.email||'').toLowerCase()===sessionEmail.toLowerCase());
+        if(localUserByEmail){
+          localUserByEmail.passwordHash=await hashPassword(newPassword);
+          localUserByEmail.password='';
+          localUserByEmail.mustResetPassword=false;
+          localStorage.setItem('eventpro_db_all',JSON.stringify(DB_ALL));
+        }
+      }
+    }catch(syncErr){
+      console.warn('Sync hash local falhou (não crítico):',syncErr);
+    }
+
     S.authRecovery.canReset=false;
     S.authRecovery.resetMessage='Senha atualizada com sucesso. Faça login com a nova senha.';
     sessionStorage.removeItem('eventpro_pwd_recovery_ready');
