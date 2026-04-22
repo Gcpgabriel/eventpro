@@ -168,40 +168,54 @@ button:disabled{opacity:.65;cursor:not-allowed;}
       if(!window.EventProSupabase || !window.EventProSupabase.updateUserPassword){
         throw new Error('Supabase indisponível.');
       }
+
+      // Captura o email da sessão ANTES de atualizar a senha
+      var syncEmail = null;
       if(window.EventProSupabase.prepareRecoverySessionFromUrl){
-        const prep = await window.EventProSupabase.prepareRecoverySessionFromUrl({ requireSession:true });
+        var prep = await window.EventProSupabase.prepareRecoverySessionFromUrl({ requireSession:true });
         if(prep && prep.error)throw prep.error;
         if(prep && prep.sessionEstablished){
           state.canReset = true;
           sessionStorage.setItem('eventpro_pwd_recovery_ready','1');
+          if(prep.session && prep.session.user && prep.session.user.email){
+            syncEmail = prep.session.user.email.toLowerCase();
+          }
         }
       }
-      const response = await window.EventProSupabase.updateUserPassword(newPassword);
+      if(!syncEmail && window.EventProSupabase.getClient){
+        try{
+          var preSession = await window.EventProSupabase.getClient().auth.getSession();
+          if(preSession && preSession.data && preSession.data.session && preSession.data.session.user && preSession.data.session.user.email){
+            syncEmail = preSession.data.session.user.email.toLowerCase();
+          }
+        }catch(_){/* ignora */}
+      }
+
+      var response = await window.EventProSupabase.updateUserPassword(newPassword);
       if(response && response.error)throw response.error;
 
-      // Sincroniza hash local para que o login com a nova senha funcione
-      try{
-        const clientRef = window.EventProSupabase.getClient && window.EventProSupabase.getClient();
-        const sessionRes = clientRef ? await clientRef.auth.getSession() : null;
-        const sessionEmail = sessionRes && sessionRes.data && sessionRes.data.session && sessionRes.data.session.user && sessionRes.data.session.user.email;
-        if(sessionEmail){
-          const rawDb = localStorage.getItem('eventpro_db_all');
-          const dbAll = rawDb ? JSON.parse(rawDb) : {};
+      // Sincroniza hash local com o email capturado antes do update
+      if(syncEmail){
+        try{
+          var rawDb = localStorage.getItem('eventpro_db_all');
+          var dbAll = rawDb ? JSON.parse(rawDb) : {};
           if(Array.isArray(dbAll.users)){
-            const localUser = dbAll.users.find(function(u){ return String(u.email||'').toLowerCase() === sessionEmail.toLowerCase(); });
+            var localUser = dbAll.users.find(function(u){ return String(u.email||'').toLowerCase() === syncEmail; });
             if(localUser){
-              const enc = new TextEncoder();
-              const buf = await crypto.subtle.digest('SHA-256', enc.encode(String(newPassword)));
-              const hash = Array.from(new Uint8Array(buf)).map(function(b){ return b.toString(16).padStart(2,'0'); }).join('');
+              var enc = new TextEncoder();
+              var buf = await crypto.subtle.digest('SHA-256', enc.encode(String(newPassword)));
+              var hash = Array.from(new Uint8Array(buf)).map(function(b){ return b.toString(16).padStart(2,'0'); }).join('');
               localUser.passwordHash = hash;
               localUser.password = '';
               localUser.mustResetPassword = false;
               localStorage.setItem('eventpro_db_all', JSON.stringify(dbAll));
             }
           }
+        }catch(syncErr){
+          console.warn('Sync hash local falhou:',syncErr);
         }
-      }catch(syncErr){
-        console.warn('Sync hash local falhou (não crítico):',syncErr);
+      }else{
+        console.warn('Hash sync: email de sessão não encontrado antes do update.');
       }
 
       await new Promise(r=>setTimeout(r,800));

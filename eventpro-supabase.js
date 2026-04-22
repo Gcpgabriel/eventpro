@@ -292,11 +292,45 @@
   }
 
   const client = getClient();
-  if(client){
-    client.auth.onAuthStateChange(function(event,session){
-      window.dispatchEvent(new CustomEvent('eventpro:supabase-auth',{ detail:{ event, session:session||null } }));
-    });
-  }
+    async function pushSnapshot(empresaId,dbAll,clistsAll){
+      const c = getClient();
+      if(!c||!empresaId)return { error:new Error('Parâmetros inválidos para pushSnapshot.') };
+      try{
+        const payload=JSON.stringify({ db:dbAll, clists:clistsAll, ts:Date.now() });
+        return await c
+          .from('company_snapshots')
+          .upsert(
+            { empresa_id:Number(empresaId), data:payload, updated_at:new Date().toISOString() },
+            { onConflict:'empresa_id' }
+          );
+      }catch(error){
+        return { error };
+      }
+    }
+
+    async function pullSnapshot(empresaId){
+      const c = getClient();
+      if(!c||!empresaId)return { data:null, error:new Error('Parâmetros inválidos para pullSnapshot.') };
+      try{
+        const { data, error } = await c
+          .from('company_snapshots')
+          .select('data,updated_at')
+          .eq('empresa_id',Number(empresaId))
+          .maybeSingle();
+        if(error)return { data:null, error };
+        if(!data||!data.data)return { data:null, error:null };
+        return { data:JSON.parse(data.data), updatedAt:data.updated_at, error:null };
+      }catch(error){
+        return { data:null, error };
+      }
+    }
+
+    const client = getClient();
+    if(client){
+      client.auth.onAuthStateChange(function(event,session){
+        window.dispatchEvent(new CustomEvent('eventpro:supabase-auth',{ detail:{ event, session:session||null } }));
+      });
+    }
 
   window.EventProSupabase = {
     config:{
@@ -306,6 +340,8 @@
     },
     getClient,
     refreshSession,
+      pushSnapshot,
+      pullSnapshot,
     signInWithPassword,
     signUp,
     createManagedUser,

@@ -816,6 +816,11 @@ function saveDB(){
     localStorage.setItem('eventpro_db',JSON.stringify(DB));
     localStorage.setItem('eventpro_clists',JSON.stringify(clists));
     if(S.currentUser?.id)localStorage.setItem('eventpro_session_user',String(S.currentUser.id));
+    // Sync para nuvem (async, não bloqueia UI)
+    if(window.EventProSupabase?.pushSnapshot){
+      window.EventProSupabase.pushSnapshot(empresaId,DB_ALL,CLISTS_ALL)
+        .catch(e=>console.warn('Cloud sync push falhou (não crítico):',e));
+    }
   }catch(e){console.error('Erro ao salvar:',e);}
 }
 
@@ -976,32 +981,39 @@ async function updatePasswordFromRecovery(){
     if(!window.EventProSupabase?.updateUserPassword){
       throw new Error('EventProSupabase indisponível para atualização de senha.');
     }
+
+    // Captura o email da sessão ANTES de atualizar a senha
+    // (após updateUser a sessão pode ser invalidada/trocada)
+    let syncEmail=null;
     if(window.EventProSupabase.prepareRecoverySessionFromUrl){
       const prep=await window.EventProSupabase.prepareRecoverySessionFromUrl({requireSession:true});
       if(prep?.error)throw prep.error;
       if(prep?.sessionEstablished){
         S.authRecovery.canReset=true;
+        syncEmail=(prep?.session?.user?.email||'').toLowerCase()||null;
       }
     }
+    if(!syncEmail&&window.EventProSupabase.getClient){
+      try{
+        const preSession=await window.EventProSupabase.getClient().auth.getSession();
+        syncEmail=(preSession?.data?.session?.user?.email||'').toLowerCase()||null;
+      }catch(_){/* ignora */}
+    }
+
     const res=await window.EventProSupabase.updateUserPassword(newPassword);
     if(res?.error)throw res.error;
 
-    // Sincroniza hash local para que o login com a nova senha funcione
-    try{
-      const clientRef=window.EventProSupabase.getClient?.();
-      const sessionRes=clientRef?await clientRef.auth.getSession():null;
-      const sessionEmail=sessionRes?.data?.session?.user?.email;
-      if(sessionEmail&&DB_ALL?.users){
-        const localUserByEmail=(DB_ALL.users).find(u=>String(u.email||'').toLowerCase()===sessionEmail.toLowerCase());
-        if(localUserByEmail){
-          localUserByEmail.passwordHash=await hashPassword(newPassword);
-          localUserByEmail.password='';
-          localUserByEmail.mustResetPassword=false;
-          localStorage.setItem('eventpro_db_all',JSON.stringify(DB_ALL));
-        }
+    // Sincroniza hash local com o email capturado antes do update
+    if(syncEmail&&DB_ALL?.users){
+      const localUserByEmail=DB_ALL.users.find(u=>String(u.email||'').toLowerCase()===syncEmail);
+      if(localUserByEmail){
+        localUserByEmail.passwordHash=await hashPassword(newPassword);
+        localUserByEmail.password='';
+        localUserByEmail.mustResetPassword=false;
+        localStorage.setItem('eventpro_db_all',JSON.stringify(DB_ALL));
       }
-    }catch(syncErr){
-      console.warn('Sync hash local falhou (não crítico):',syncErr);
+    }else{
+      console.warn('Hash sync: email da sessão de recovery não encontrado. Login local pode falhar.');
     }
 
     S.authRecovery.canReset=false;
@@ -6304,6 +6316,37 @@ async function doLogin(){
     localStorage.setItem('eventpro_session_user',String(candidate.id));
     toast(`Bem-vindo ao EventPro, ${candidate.name.split(' ')[0]}! 👋`);
     render();
+    // Carrega dados da nuvem em background e atualiza a UI se houver snapshot mais recente
+    if(window.EventProSupabase?.pullSnapshot){
+      window.EventProSupabase.pullSnapshot(candidate.empresa_id).then(function(result){
+        if(!result?.data?.db||result?.error)return;
+        try{
+          const cloudDB=normalizeMultiTenantStore(result.data.db);
+          const localUsers=deepClone(DB_ALL.users||[]);
+          DB_ALL=cloudDB;
+          // Preserva senhas/flags locais — nunca sobrescrever com dado da nuvem
+          DB_ALL.users=DB_ALL.users.map(function(cu){
+            const lu=localUsers.find(function(u){ return Number(u.id)===Number(cu.id); });
+            return lu?Object.assign({},cu,{
+              passwordHash:lu.passwordHash||cu.passwordHash,
+              password:lu.password||cu.password,
+              mustResetPassword:lu.mustResetPassword!=null?lu.mustResetPassword:cu.mustResetPassword,
+            }):cu;
+          });
+          if(result.data.clists){
+            CLISTS_ALL=normalizeClistsStore(result.data.clists);
+            localStorage.setItem('eventpro_clists_all',JSON.stringify(CLISTS_ALL));
+          }
+          localStorage.setItem('eventpro_db_all',JSON.stringify(DB_ALL));
+          const freshUser=DB_ALL.users.find(function(u){ return Number(u.id)===Number(candidate.id); })||candidate;
+          applyTenantScope(freshUser);
+          render();
+          console.log('Dados sincronizados da nuvem com sucesso.');
+        }catch(syncErr){
+          console.warn('Erro ao aplicar snapshot da nuvem:',syncErr);
+        }
+      }).catch(function(e){ console.warn('Cloud sync pull falhou (não crítico):',e); });
+    }
   }catch(err){
     console.error('Erro no login:',err);
     toast('Falha ao entrar. Os dados locais foram restaurados; tente novamente.','err');
