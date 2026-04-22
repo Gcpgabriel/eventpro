@@ -323,19 +323,13 @@ function removeLogo(){
 function saveConfig(){
   DB.company.name=document.getElementById('cfg-name').value.trim();
   DB.company.owner=document.getElementById('cfg-owner').value.trim();
-  DB.company.cnpj=document.getElementById('cfg-cnpj').value.trim();
-  DB.company.phone=document.getElementById('cfg-phone').value.trim();
-  DB.company.email=document.getElementById('cfg-email').value.trim();
-  DB.company.city=document.getElementById('cfg-city').value.trim();
-  DB.company.address=document.getElementById('cfg-address').value.trim();
-  DB.company.specialties=document.getElementById('cfg-specialties').value.trim();
+  if(!saveCompanyProfileFromInputs('cfg-'))return;
   const idx=DB_ALL.companies.findIndex(c=>c.id===Number(S.companyId||1));
   if(idx>=0)Object.assign(DB_ALL.companies[idx],{
     name:DB.company.name,owner:DB.company.owner,cnpj:DB.company.cnpj,
     phone:DB.company.phone,email:DB.company.email,city:DB.company.city,address:DB.company.address,
     specialties:DB.company.specialties,
   });
-  saveDB();
   toast('Configurações salvas com sucesso ✅');
   render();
 }
@@ -799,6 +793,10 @@ let S = {
     canReset:false,
     localUserId:null,
   },
+  companyOnboarding:{
+    step:1,
+    draft:null,
+  },
 };
 
 const PASSWORD_MIN_LEN=8;
@@ -817,6 +815,44 @@ async function verifyPassword(plain,stored){
   if(!stored)return false;
   if(isHashed(stored))return(await hashPassword(plain))===stored;
   return String(plain)===String(stored); // legacy plain-text backward compat
+}
+
+async function ensureSupabaseAuthForLocalUser(user,password){
+  if(!window.EventProSupabase||!user?.email||!password){
+    return { session:null, error:new Error('Supabase indisponível para provisionamento.') };
+  }
+
+  const normalizedEmail=String(user.email).trim().toLowerCase();
+  let remoteLogin=await window.EventProSupabase.signInWithPassword(normalizedEmail,password);
+  if(!remoteLogin?.error){
+    const session=await window.EventProSupabase.refreshSession();
+    return { session, error:null, created:false };
+  }
+
+  const companyRef=(DB_ALL?.companies||[]).find(c=>Number(c.id)===Number(user.empresa_id||S.companyId||1));
+  const metadata={
+    full_name:user.name||'',
+    role:roleNorm(user.role),
+    company_id:Number(user.empresa_id||S.companyId||1),
+    company_name:companyRef?.name||DB.company?.name||'',
+  };
+
+  if(window.EventProSupabase.createManagedUser){
+    const remoteCreate=await window.EventProSupabase.createManagedUser(normalizedEmail,password,metadata);
+    const createMessage=String(remoteCreate?.error?.message||'').toLowerCase();
+    const alreadyExists=createMessage.includes('already registered')||createMessage.includes('already been registered')||createMessage.includes('user already registered');
+    if(remoteCreate?.error&&!alreadyExists){
+      return { session:null, error:remoteCreate.error, created:false };
+    }
+
+    remoteLogin=await window.EventProSupabase.signInWithPassword(normalizedEmail,password);
+    if(!remoteLogin?.error){
+      const session=await window.EventProSupabase.refreshSession();
+      return { session, error:null, created:true };
+    }
+  }
+
+  return { session:null, error:remoteLogin?.error||new Error('Falha ao autenticar no Supabase.') };
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1226,6 +1262,136 @@ function extractCityUFFromAddress(address){
   const dashMatch=normalized.match(/([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s.'-]{1,})\s*-\s*([A-Za-z]{2})(?=\b|[^A-Za-z])/u);
   if(dashMatch)return `${dashMatch[1].trim()}/${dashMatch[2].toUpperCase()}`;
   return '';
+}
+
+function companyNeedsProfileOnboarding(company){
+  const co=company||{};
+  return !String(co.cnpj||'').trim()
+    || !String(co.email||'').trim()
+    || !String(co.city||'').trim()
+    || !String(co.address||'').trim()
+    || !String(co.specialties||'').trim();
+}
+
+function shouldForceCompanyOnboarding(){
+  return !!S.in&&currentRole()==='admin'&&companyNeedsProfileOnboarding(DB.company);
+}
+
+function getCompanyOnboardingDraft(){
+  const current=S.companyOnboarding?.draft||{};
+  return {
+    cnpj:current.cnpj??String(DB.company?.cnpj||''),
+    phone:current.phone??String(DB.company?.phone||''),
+    email:current.email??String(DB.company?.email||''),
+    city:current.city??String(DB.company?.city||''),
+    address:current.address??String(DB.company?.address||''),
+    specialties:current.specialties??String(DB.company?.specialties||''),
+    logo:current.logo??String(DB.company?.logo||''),
+  };
+}
+
+function ensureCompanyOnboardingState(){
+  S.companyOnboarding=S.companyOnboarding||{step:1,draft:null};
+  S.companyOnboarding.step=Math.min(3,Math.max(1,Number(S.companyOnboarding.step||1)));
+  S.companyOnboarding.draft=getCompanyOnboardingDraft();
+}
+
+function syncCompanyOnboardingDraftFromInputs(){
+  ensureCompanyOnboardingState();
+  const draft=S.companyOnboarding.draft;
+  ['cnpj','phone','email','city','address','specialties'].forEach((field)=>{
+    const el=document.getElementById(`onb-${field}`);
+    if(el)draft[field]=String(el.value||'').trim();
+  });
+}
+
+function goCompanyOnboardingStep(step){
+  syncCompanyOnboardingDraftFromInputs();
+  S.companyOnboarding.step=Math.min(3,Math.max(1,Number(step||1)));
+  render();
+}
+
+function handleOnboardingLogoUpload(e){
+  ensureCompanyOnboardingState();
+  const file=e.target.files[0];
+  if(!file)return;
+  if(file.size>2*1024*1024){
+    toast('Arquivo muito grande. O tamanho máximo é 2 MB.','err');
+    e.target.value='';
+    return;
+  }
+  const reader=new FileReader();
+  reader.onload=ev=>{
+    S.companyOnboarding.draft.logo=String(ev.target?.result||'');
+    render();
+  };
+  reader.readAsDataURL(file);
+}
+
+function saveCompanyProfileValues(values){
+  const payload=values||{};
+  const cnpj=String(payload.cnpj||'').trim();
+  const phone=String(payload.phone||'').trim();
+  const email=String(payload.email||'').trim().toLowerCase();
+  const city=String(payload.city||'').trim();
+  const address=String(payload.address||'').trim();
+  const specialties=String(payload.specialties||'').trim();
+  const logo=String(payload.logo||'').trim();
+
+  if(cnpj&&!isValidCNPJ(cnpj)){
+    toast('CNPJ inválido. Verifique e tente novamente.','err');
+    return false;
+  }
+  if(!email||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){
+    toast('Informe um e-mail comercial válido.','err');
+    return false;
+  }
+  if(!city||!address||!specialties){
+    toast('Preencha Cidade/UF, endereço e especialidades para continuar.','err');
+    return false;
+  }
+
+  DB.company.cnpj=cnpj;
+  DB.company.phone=phone;
+  DB.company.email=email;
+  DB.company.city=city||extractCityUFFromAddress(address);
+  DB.company.address=address;
+  DB.company.specialties=specialties;
+  if(logo)DB.company.logo=logo;
+
+  const idx=DB_ALL.companies.findIndex(c=>c.id===Number(S.companyId||1));
+  if(idx>=0)Object.assign(DB_ALL.companies[idx],{
+    cnpj:DB.company.cnpj,
+    phone:DB.company.phone,
+    email:DB.company.email,
+    city:DB.company.city,
+    address:DB.company.address,
+    specialties:DB.company.specialties,
+    logo:DB.company.logo||'',
+  });
+  saveDB();
+  return true;
+}
+
+function saveCompanyProfileFromInputs(prefix){
+  return saveCompanyProfileValues({
+    cnpj:document.getElementById(`${prefix}cnpj`)?.value.trim()||'',
+    phone:document.getElementById(`${prefix}phone`)?.value.trim()||'',
+    email:document.getElementById(`${prefix}email`)?.value.trim().toLowerCase()||'',
+    city:document.getElementById(`${prefix}city`)?.value.trim()||'',
+    address:document.getElementById(`${prefix}address`)?.value.trim()||'',
+    specialties:document.getElementById(`${prefix}specialties`)?.value.trim()||'',
+    logo:DB.company?.logo||'',
+  });
+}
+
+function completeCompanyOnboarding(){
+  syncCompanyOnboardingDraftFromInputs();
+  if(!saveCompanyProfileValues(S.companyOnboarding.draft||{}))return false;
+  S.companyOnboarding.step=1;
+  S.companyOnboarding.draft=null;
+  toast('Dados da empresa concluídos com sucesso.','ok');
+  return true;
 }
 
 function getCompanyCityLabel(company){
@@ -6320,6 +6486,45 @@ const MODS={
     },
     ok:createConsumablePayable,
   },
+  companyOnboarding:{
+    title:'Complete o Perfil da Empresa',
+    body:()=>{
+      ensureCompanyOnboardingState();
+      const draft=S.companyOnboarding.draft||getCompanyOnboardingDraft();
+      const step=Number(S.companyOnboarding.step||1);
+      const stepMeta=[
+        {n:1,label:'Dados fiscais'},
+        {n:2,label:'Dados comerciais'},
+        {n:3,label:'Conclusão'},
+      ];
+      const stepChips=stepMeta.map(item=>`<div style="flex:1;min-width:0;padding:8px 10px;border-radius:10px;border:1px solid ${item.n===step?'var(--accent2)':'var(--border)'};background:${item.n===step?'rgba(74,163,255,.08)':'var(--bg2)'};font-size:11px;color:${item.n===step?'var(--accent2)':'var(--text2)'};font-weight:${item.n===step?'700':'500'};text-align:center;">${item.n}. ${item.label}</div>`).join('');
+      const logoPreview=draft.logo?`<img src="${draft.logo}" alt="Logo da empresa" style="max-height:110px;max-width:260px;display:block;border-radius:8px;border:1px solid var(--border);margin-top:8px;">`:'<div style="color:var(--muted);font-size:12px;margin-top:8px;">Logo opcional. Você pode adicionar agora ou depois em Configurações.</div>';
+      let fields='';
+      if(step===1){
+        fields=`<div class="grid g2"><div class="fg"><label class="fl">CNPJ</label><input id="onb-cnpj" class="fc" value="${esc(draft.cnpj||'')}" placeholder="00.000.000/0001-00"></div><div class="fg"><label class="fl">Telefone</label><input id="onb-phone" class="fc" value="${esc(draft.phone||'')}" placeholder="(00) 00000-0000"></div></div>`;
+      }else if(step===2){
+        fields=`<div class="fg"><label class="fl">E-mail Comercial <span style="color:var(--red)">*</span></label><input id="onb-email" type="email" class="fc" value="${esc(draft.email||'')}" placeholder="contato@suaempresa.com"></div>
+        <div class="fg"><label class="fl">Cidade/UF <span style="color:var(--red)">*</span></label><input id="onb-city" class="fc" value="${esc(draft.city||'')}" placeholder="Ex: Anápolis/GO"></div>
+        <div class="fg"><label class="fl">Endereço <span style="color:var(--red)">*</span></label><input id="onb-address" class="fc" value="${esc(draft.address||'')}" placeholder="Rua, número, cidade e UF"></div>
+        <div class="fg"><label class="fl">Especialidades <span style="color:var(--red)">*</span></label><input id="onb-specialties" class="fc" value="${esc(draft.specialties||'')}" placeholder="Som, Iluminação, Estrutura..."></div>`;
+      }else{
+        fields=`<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:12px;display:grid;gap:8px;font-size:12px;">
+          <div><strong>CNPJ:</strong> ${esc(draft.cnpj||'—')}</div>
+          <div><strong>Telefone:</strong> ${esc(draft.phone||'—')}</div>
+          <div><strong>E-mail Comercial:</strong> ${esc(draft.email||'—')}</div>
+          <div><strong>Cidade/UF:</strong> ${esc(draft.city||'—')}</div>
+          <div><strong>Endereço:</strong> ${esc(draft.address||'—')}</div>
+          <div><strong>Especialidades:</strong> ${esc(draft.specialties||'—')}</div>
+        </div>
+        <div class="fg" style="margin-top:10px;"><label class="fl">Logo da Empresa <span style="color:var(--text3);font-size:11px;">(opcional)</span></label>${logoPreview}<div style="display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap;"><label class="btn btn-secondary" style="cursor:pointer;">📁 Selecionar imagem<input type="file" id="onb-logo-input" accept="image/*" style="display:none;" onchange="handleOnboardingLogoUpload(event)"></label>${draft.logo?`<button type="button" class="btn btn-ghost" onclick="S.companyOnboarding.draft.logo='';render()">🗑 Remover logo</button>`:''}</div></div>`;
+      }
+      return `
+        <div style="background:var(--bg2);border-left:3px solid var(--accent2);padding:10px 12px;border-radius:8px;margin-bottom:12px;font-size:12px;color:var(--text2);">Para concluir o primeiro acesso, informe os dados essenciais da empresa. Depois você pode editar tudo em Configurações.</div>
+        <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;">${stepChips}</div>
+        ${fields}`;
+    },
+    ok:completeCompanyOnboarding,
+  },
 };
 
 function renderModal(){
@@ -6328,15 +6533,18 @@ function renderModal(){
   if(!m)return'';
   const title=typeof m.title==='function'?m.title():m.title;
   const body=typeof m.body==='function'?m.body():m.body;
+  const locked=S.modal==='companyOnboarding'&&shouldForceCompanyOnboarding();
+  const onboardingStep=Number(S.companyOnboarding?.step||1);
+  const onboardingFooter=locked?`${onboardingStep>1?`<button class="btn btn-ghost" onclick="goCompanyOnboardingStep(${onboardingStep-1})">Voltar</button>`:'<span style="font-size:11px;color:var(--text3);">Etapa ${onboardingStep} de 3</span>'}<button class="btn btn-primary" onclick="${onboardingStep<3?`goCompanyOnboardingStep(${onboardingStep+1})`:`if(MODS['companyOnboarding'].ok()!==false)closeM()`}">${onboardingStep<3?'Continuar':'Concluir'}</button>`:'';
   if(S.modal==='newProposal')setTimeout(updateProposalAvailabilityPreview,0);
   if(S.modal==='addClient')setTimeout(onClientTypeChange,0);
   if(S.modal==='editClient')setTimeout(onEditClientTypeChange,0);
   if(S.modal==='addTask')setTimeout(onAddTaskTypeChange,0);
-  return`<div class="modal-ov open" onclick="if(event.target===this)closeM()">
+  return`<div class="modal-ov open" onclick="if(!${locked?'true':'false'}&&event.target===this)closeM()">
   <div class="modal">
-    <div class="modal-hd"><span class="modal-title">${title}</span><button class="btn btn-ghost btn-icon" onclick="closeM()" style="font-size:19px;border:none;line-height:1;">×</button></div>
+    <div class="modal-hd"><span class="modal-title">${title}</span>${locked?'':`<button class="btn btn-ghost btn-icon" onclick="closeM()" style="font-size:19px;border:none;line-height:1;">×</button>`}</div>
     <div class="modal-bd">${body}</div>
-    <div class="modal-ft"><button class="btn btn-ghost" onclick="closeM()">Cancelar</button><button class="btn btn-primary" onclick="if(MODS['${S.modal}'].ok()!==false)closeM()">Salvar</button></div>
+    <div class="modal-ft">${locked?onboardingFooter:`<button class="btn btn-ghost" onclick="closeM()">Cancelar</button><button class="btn btn-primary" onclick="if(MODS['${S.modal}'].ok()!==false)closeM()">Salvar</button>`}</div>
   </div></div>`;
 }
 
@@ -6395,14 +6603,10 @@ function renderLogin(){
     <div style="color:var(--text2);font-size:13px;margin-top:4px;">Criar conta gratuita</div>
   </div>
   <div style="background:var(--bg2);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:12px;color:var(--text2);border-left:3px solid var(--accent2);">
-    <strong style="color:var(--text1);">🏢 Dados da Empresa</strong>
+    <strong style="color:var(--text1);">Cadastro Rápido</strong><br>
+    Os dados fiscais e comerciais da empresa serão concluídos no primeiro acesso.
   </div>
   <div class="fg"><label class="fl">Nome da Empresa <span style="color:var(--red)">*</span></label><input class="fc" id="rEmpresa" placeholder="Ex: Som & Luz Produções Ltda"></div>
-  <div class="grid g2"><div class="fg"><label class="fl">CNPJ</label><input class="fc" id="rCnpj" placeholder="00.000.000/0001-00"></div><div class="fg"><label class="fl">Telefone</label><input class="fc" id="rPhone" placeholder="(00) 00000-0000"></div></div>
-  <div class="fg"><label class="fl">E-mail Comercial</label><input class="fc" type="email" id="rCompanyEmail" placeholder="contato@suaempresa.com"></div>
-  <div class="fg"><label class="fl">Cidade/UF (documentos)</label><input class="fc" id="rCity" placeholder="Ex: Anápolis/GO"></div>
-  <div class="fg"><label class="fl">Endereço</label><input class="fc" id="rAddress" placeholder="Rua, número, cidade e UF"></div>
-  <div class="fg"><label class="fl">Especialidades</label><input class="fc" id="rSpecialties" placeholder="Som, Iluminação, Estrutura..."></div>
   <div class="fg"><label class="fl">Seu Nome Completo <span style="color:var(--red)">*</span></label><input class="fc" id="rNome" placeholder="Ex: Rafael Moura"></div>
   <div class="fg"><label class="fl">Email (login do admin) <span style="color:var(--red)">*</span></label><input class="fc" type="email" id="rEmail" placeholder="admin@suaempresa.com"></div>
   <div class="fg"><label class="fl">Senha <span style="color:var(--red)">*</span></label><input class="fc" type="password" id="rSenha" placeholder="Maiúscula, minúscula, número + caractere especial" onkeyup="updatePasswordStrengthDisplay('rSenha', 'strength-register')"><div id="strength-register" style="margin-top:6px;font-size:12px;color:var(--muted);"></div></div>
@@ -6449,8 +6653,8 @@ async function doLogin(){
 
     if(candidate.mustResetPassword){
       if(window.EventProSupabase){
-        const remoteLogin = await window.EventProSupabase.signInWithPassword(email,pass);
-        if(remoteLogin?.error)console.warn('Login Supabase no primeiro acesso falhou:',remoteLogin.error);
+        const ensured=await ensureSupabaseAuthForLocalUser(candidate,pass);
+        if(ensured?.error)console.warn('Provisionamento/login Supabase no primeiro acesso falhou:',ensured.error);
       }
       S.in=false;
       S.page='login';
@@ -6465,12 +6669,14 @@ async function doLogin(){
 
     let cloudSessionReady=false;
     if(window.EventProSupabase){
-      const remoteLogin=await window.EventProSupabase.signInWithPassword(email,pass);
-      if(remoteLogin?.error){
-        console.warn('Login Supabase falhou; sync entre dispositivos ficará indisponível:',remoteLogin.error);
+      const ensured=await ensureSupabaseAuthForLocalUser(candidate,pass);
+      if(ensured?.error){
+        console.warn('Login/provisionamento Supabase falhou; sync entre dispositivos ficará indisponível:',ensured.error);
       }else{
-        const currentSession=await window.EventProSupabase.refreshSession();
-        cloudSessionReady=!!currentSession;
+        cloudSessionReady=!!ensured?.session;
+        if(ensured?.created){
+          toast('Login na nuvem criado automaticamente para este usuário.','ok');
+        }
       }
     }
 
@@ -6540,12 +6746,6 @@ async function doLogin(){
 
 async function registerEmpresa(){
   const nomeEmpresa=(document.getElementById('rEmpresa')?.value||'').trim();
-  const companyCnpj=(document.getElementById('rCnpj')?.value||'').trim();
-  const companyPhone=(document.getElementById('rPhone')?.value||'').trim();
-  const companyContactEmail=(document.getElementById('rCompanyEmail')?.value||'').trim().toLowerCase();
-  const companyCity=(document.getElementById('rCity')?.value||'').trim();
-  const companyAddress=(document.getElementById('rAddress')?.value||'').trim();
-  const companySpecialties=(document.getElementById('rSpecialties')?.value||'').trim();
   const nomeAdmin=(document.getElementById('rNome')?.value||'').trim();
   const email=(document.getElementById('rEmail')?.value||'').trim().toLowerCase();
   const senha=(document.getElementById('rSenha')?.value||'').trim();
@@ -6555,8 +6755,6 @@ async function registerEmpresa(){
   if(!nomeEmpresa){toast('Informe o nome da empresa.','err');return;}
   if(!nomeAdmin){toast('Informe seu nome completo.','err');return;}
   if(!email||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){toast('Informe um email válido.','err');return;}
-  if(companyContactEmail&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(companyContactEmail)){toast('Informe um e-mail comercial válido.','err');return;}
-  if(companyCnpj&&!isValidCNPJ(companyCnpj)){toast('CNPJ inválido. Verifique e tente novamente.','err');return;}
   const passwordValidation=validatePasswordPolicy(senha,senha2);
   if(!passwordValidation.ok){toast(passwordValidation.message,'err');return;}
   if(!lgpd){toast('Aceite os termos de uso de dados (LGPD) para continuar.','err');return;}
@@ -6578,12 +6776,12 @@ async function registerEmpresa(){
     id:newEmpresaId,
     name:nomeEmpresa,
     owner:nomeAdmin,
-    cnpj:companyCnpj,
-    city:companyCity||extractCityUFFromAddress(companyAddress),
-    address:companyAddress,
-    phone:companyPhone,
-    email:companyContactEmail||email,
-    specialties:companySpecialties,
+    cnpj:'',
+    city:'',
+    address:'',
+    phone:'',
+    email:'',
+    specialties:'',
   };
   const newAdmin={id:newUserId,name:nomeAdmin,email,role:'admin',empresa_id:newEmpresaId,initials:initialsFromName(nomeAdmin),passwordHash:pwdHash};
 
@@ -6623,6 +6821,11 @@ const PAGES={
 function render(){
   const root=document.getElementById('root');
   if(!S.in){root.innerHTML=renderLogin();return;}
+  if(shouldForceCompanyOnboarding()&&S.modal!=='companyOnboarding'){
+    ensureCompanyOnboardingState();
+    S.companyOnboarding.step=1;
+    S.modal='companyOnboarding';
+  }
   const pg=(PAGES[S.page]||pgDashboard)();
   root.innerHTML=`<div id="app" class="${S.sidebarCollapsed?'sidebar-collapsed':''}">
     ${renderSidebar()}
