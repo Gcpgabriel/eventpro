@@ -320,6 +320,50 @@
     }
   }
 
+  async function pullSnapshotByUserEmail(userEmail){
+    const client = getClient();
+    const email = String(userEmail||'').trim().toLowerCase();
+    if(!client||!email)return { data:null, error:wrapError(new Error('Parâmetros inválidos para pullSnapshotByUserEmail.')) };
+    try{
+      const { data, error } = await client
+        .from('company_snapshots')
+        .select('empresa_id,data,updated_at')
+        .order('updated_at',{ ascending:false })
+        .limit(50);
+
+      if(error)return { data:null, error:wrapError(error) };
+      if(!Array.isArray(data)||!data.length)return { data:null, error:null };
+
+      for(const row of data){
+        if(!row?.data)continue;
+        let parsed = null;
+        try{
+          parsed = JSON.parse(row.data);
+        }catch(_ignore){
+          continue;
+        }
+
+        const users = Array.isArray(parsed?.db?.users) ? parsed.db.users : [];
+        const found = users.some(function(user){
+          return String(user?.email||'').trim().toLowerCase()===email;
+        });
+
+        if(found){
+          return {
+            data:parsed,
+            empresaId:Number(row.empresa_id),
+            updatedAt:row.updated_at,
+            error:null,
+          };
+        }
+      }
+
+      return { data:null, error:null };
+    }catch(error){
+      return { data:null, error:wrapError(error) };
+    }
+  }
+
   async function healthCheck(){
     const client = getClient();
     if(!client)return { ok:false, reason:'no-client', error:wrapError(new Error('SDK Supabase indisponível.')) };
@@ -368,6 +412,7 @@
     removeById,
     pushSnapshot,
     pullSnapshot,
+    pullSnapshotByUserEmail,
     healthCheck,
   };
 })();

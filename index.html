@@ -6644,12 +6644,73 @@ async function doLogin(){
     loadDB();
   }
 
-  const candidate=(DB_ALL?.users||[]).find(u=>String(u.email).toLowerCase()===email);
-  if(!candidate){toast('Usuário ou senha inválidos.','err');return;}
+  let candidate=(DB_ALL?.users||[]).find(u=>String(u.email).toLowerCase()===email);
 
   try{
+    // Fallback cloud-first: em navegador novo pode não existir usuário local ainda.
+    if(!candidate&&window.EventProSupabase){
+      const remoteLogin=await window.EventProSupabase.signInWithPassword(email,pass);
+      if(remoteLogin?.error){
+        toast('Usuário ou senha inválidos.','err');
+        return;
+      }
+
+      let hydrated=false;
+      if(window.EventProSupabase.pullSnapshotByUserEmail){
+        const byEmail=await window.EventProSupabase.pullSnapshotByUserEmail(email);
+        if(byEmail?.error){
+          console.warn('Fallback cloud pull por e-mail falhou:',byEmail.error);
+        }else if(byEmail?.data?.db){
+          DB_ALL=normalizeMultiTenantStore(byEmail.data.db);
+          if(byEmail?.data?.clists){
+            CLISTS_ALL=normalizeClistsStore(byEmail.data.clists);
+          }
+          localStorage.setItem('eventpro_db_all',JSON.stringify(DB_ALL));
+          localStorage.setItem('eventpro_clists_all',JSON.stringify(CLISTS_ALL));
+          hydrated=true;
+        }
+      }
+
+      if(!hydrated&&window.EventProSupabase.pullSnapshot){
+        const fallbackCompanyId=Number(remoteLogin?.data?.user?.user_metadata?.company_id||0);
+        if(fallbackCompanyId>0){
+          const snap=await window.EventProSupabase.pullSnapshot(fallbackCompanyId);
+          if(!snap?.error&&snap?.data?.db){
+            DB_ALL=normalizeMultiTenantStore(snap.data.db);
+            if(snap?.data?.clists){
+              CLISTS_ALL=normalizeClistsStore(snap.data.clists);
+            }
+            localStorage.setItem('eventpro_db_all',JSON.stringify(DB_ALL));
+            localStorage.setItem('eventpro_clists_all',JSON.stringify(CLISTS_ALL));
+            hydrated=true;
+          }
+        }
+      }
+
+      candidate=(DB_ALL?.users||[]).find(u=>String(u.email).toLowerCase()===email);
+      if(!candidate){
+        toast('Login na nuvem confirmado, mas não encontramos os dados da empresa neste dispositivo. Faça login no dispositivo original para forçar uma sincronização e tente novamente.','err');
+        return;
+      }
+    }
+
+    if(!candidate){toast('Usuário ou senha inválidos.','err');return;}
+
     const ok=await verifyPassword(pass,candidate.passwordHash||candidate.password||'');
-    if(!ok){toast('Usuário ou senha inválidos.','err');return;}
+    if(!ok&&window.EventProSupabase){
+      const remoteLogin=await window.EventProSupabase.signInWithPassword(email,pass);
+      if(remoteLogin?.error){
+        toast('Usuário ou senha inválidos.','err');
+        return;
+      }
+      // Se a senha foi alterada em outro dispositivo, atualiza o hash local.
+      candidate.passwordHash=await hashPassword(pass);
+      candidate.password='';
+      localStorage.setItem('eventpro_db_all',JSON.stringify(DB_ALL));
+    }else if(!ok){
+      toast('Usuário ou senha inválidos.','err');
+      return;
+    }
 
     if(candidate.mustResetPassword){
       if(window.EventProSupabase){
