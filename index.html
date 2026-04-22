@@ -22,7 +22,8 @@ body{font-family:var(--fb);background:var(--bg);color:var(--text);font-size:14px
 
 /* SIDEBAR */
 #sidebar{width:228px;min-width:228px;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;transition:width .3s;}
-.sb-logo{padding:18px 16px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;}
+.sb-logo{padding:18px 16px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;cursor:pointer;transition:background .15s;}
+.sb-logo:hover{background:var(--bg3);}
 .logo-icon{width:32px;height:32px;background:var(--accent);border-radius:8px;display:flex;align-items:center;justify-content:center;font-family:var(--fh);font-weight:800;font-size:14px;color:#fff;flex-shrink:0;}
 .logo-name{font-family:var(--fh);font-weight:700;font-size:15px;}
 .logo-pro{font-size:9px;background:var(--accent);color:#fff;padding:2px 5px;border-radius:4px;font-weight:700;margin-left:auto;}
@@ -44,6 +45,27 @@ body{font-family:var(--fb);background:var(--bg);color:var(--text);font-size:14px
 .avatar{width:30px;height:30px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;flex-shrink:0;}
 .user-name{font-size:12.5px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .user-role{font-size:10.5px;color:var(--text3);}
+.user-actions{position:relative;margin-left:auto;}
+.user-menu-btn{width:28px;height:28px;border-radius:8px;border:1px solid var(--border2);background:transparent;color:var(--text2);cursor:pointer;font-size:18px;line-height:1;display:flex;align-items:center;justify-content:center;}
+.user-menu-btn:hover{background:var(--bg3);color:var(--text);}
+.user-menu{position:absolute;right:0;bottom:34px;min-width:210px;background:var(--bg2);border:1px solid var(--border2);border-radius:10px;box-shadow:0 10px 24px rgba(0,0,0,.35);padding:6px;z-index:20;}
+.user-menu-item{display:flex;align-items:center;gap:8px;width:100%;padding:8px 10px;border-radius:8px;border:none;background:transparent;color:var(--text2);font-size:12.5px;text-align:left;cursor:pointer;}
+.user-menu-item:hover{background:var(--bg3);color:var(--text);}
+.user-menu-item.danger{color:var(--red);}
+
+#app.sidebar-collapsed #sidebar{width:54px;min-width:54px;}
+#app.sidebar-collapsed .logo-name,
+#app.sidebar-collapsed .logo-pro,
+#app.sidebar-collapsed .nav-item span:not(.nav-icon),
+#app.sidebar-collapsed .nav-badge,
+#app.sidebar-collapsed .user-name,
+#app.sidebar-collapsed .user-role,
+#app.sidebar-collapsed .nav-sec-label{display:none;}
+#app.sidebar-collapsed .nav-item{justify-content:center;padding:10px;}
+#app.sidebar-collapsed .sb-logo{justify-content:center;padding:14px 10px;}
+#app.sidebar-collapsed .user-row{justify-content:center;cursor:default;pointer-events:none;}
+#app.sidebar-collapsed .user-actions{display:none;}
+#app.sidebar-collapsed .user-menu{right:-8px;}
 
 /* MAIN */
 #main{flex:1;overflow:hidden;display:flex;flex-direction:column;}
@@ -149,7 +171,7 @@ textarea.fc{resize:vertical;min-height:72px;}
 
 /* LOGIN */
 .login-wrap{display:flex;align-items:center;justify-content:center;min-height:100vh;background:var(--bg);}
-.login-card{background:var(--bg2);border:1px solid var(--border);border-radius:20px;padding:38px;width:370px;}
+.login-card{background:var(--bg2);border:1px solid var(--border);border-radius:20px;padding:38px;width:370px;max-height:88vh;overflow-y:auto;}
 .login-logo{text-align:center;margin-bottom:26px;}
 .login-ico{width:50px;height:50px;background:var(--accent);border-radius:13px;display:inline-flex;align-items:center;justify-content:center;font-family:var(--fh);font-weight:800;font-size:20px;color:#fff;margin-bottom:10px;}
 
@@ -219,11 +241,17 @@ textarea.fc{resize:vertical;min-height:72px;}
 function pgConfig(){
   const co=DB.company;
   const isAdmin=currentRole()==='admin';
+  const compId=Number(S.companyId||1);
+  const sysUsers=(DB_ALL?.users||[]).filter(u=>Number(u.empresa_id)===compId);
+  const employees=sysUsers.filter(u=>roleNorm(u.role)!=='admin');
+  const MAX_EMPLOYEES=3;
+  const canAddUser=isAdmin&&employees.length<MAX_EMPLOYEES;
   const logoPreview=co.logo?`<img src="${co.logo}" alt="Logo da empresa" style="max-height:120px;max-width:300px;display:block;border-radius:8px;border:1px solid var(--border);margin-top:8px;">`:'<div style="color:var(--muted);font-size:13px;margin-top:8px;">Nenhuma logo carregada</div>';
   const editFields=isAdmin?`
     <div class="form-row"><div class="form-group"><label>Nome da Empresa</label><input id="cfg-name" class="input" value="${esc(co.name||'')}"></div><div class="form-group"><label>Responsável</label><input id="cfg-owner" class="input" value="${esc(co.owner||'')}"></div></div>
     <div class="form-row"><div class="form-group"><label>CNPJ</label><input id="cfg-cnpj" class="input" value="${esc(co.cnpj||'')}"></div><div class="form-group"><label>Telefone</label><input id="cfg-phone" class="input" value="${esc(co.phone||'')}"></div></div>
     <div class="form-group"><label>E-mail</label><input id="cfg-email" class="input" value="${esc(co.email||'')}"></div>
+    <div class="form-group"><label>Cidade/UF (assinatura de documentos)</label><input id="cfg-city" class="input" value="${esc(co.city||'')}" placeholder="Ex: Anápolis/GO"></div>
     <div class="form-group"><label>Endereço</label><input id="cfg-address" class="input" value="${esc(co.address||'')}"></div>
     <div class="form-group"><label>Especialidades</label><input id="cfg-specialties" class="input" value="${esc(co.specialties||'')}"></div>
     <div class="form-group"><label>Logo da Empresa <span style="color:var(--muted);font-size:12px;">(JPEG, PNG ou GIF — máx 2 MB)</span></label>${logoPreview}<div style="display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap;"><label class="btn btn-secondary" style="cursor:pointer;">📁 Selecionar imagem<input type="file" id="cfg-logo-input" accept="image/*" style="display:none;" onchange="handleLogoUpload(event)"></label>${co.logo?`<button class="btn btn-ghost" onclick="removeLogo()">🗑 Remover logo</button>`:''}</div><div id="cfg-logo-error" style="color:var(--danger);font-size:13px;margin-top:4px;display:none;"></div></div>
@@ -232,11 +260,34 @@ function pgConfig(){
     <div class="form-row"><div class="form-group"><label>Nome da Empresa</label><div class="input" style="background:var(--bg-alt);color:var(--muted);">${esc(co.name||'—')}</div></div><div class="form-group"><label>Responsável</label><div class="input" style="background:var(--bg-alt);color:var(--muted);">${esc(co.owner||'—')}</div></div></div>
     <div class="form-row"><div class="form-group"><label>CNPJ</label><div class="input" style="background:var(--bg-alt);color:var(--muted);">${esc(co.cnpj||'—')}</div></div><div class="form-group"><label>Telefone</label><div class="input" style="background:var(--bg-alt);color:var(--muted);">${esc(co.phone||'—')}</div></div></div>
     <div class="form-group"><label>E-mail</label><div class="input" style="background:var(--bg-alt);color:var(--muted);">${esc(co.email||'—')}</div></div>
+    <div class="form-group"><label>Cidade/UF (assinatura de documentos)</label><div class="input" style="background:var(--bg-alt);color:var(--muted);">${esc(getCompanyCityOrFallback(co,'—'))}</div></div>
     <div class="form-group"><label>Endereço</label><div class="input" style="background:var(--bg-alt);color:var(--muted);">${esc(co.address||'—')}</div></div>
     <div class="form-group"><label>Especialidades</label><div class="input" style="background:var(--bg-alt);color:var(--muted);">${esc(co.specialties||'—')}</div></div>
     <div class="form-group"><label>Logo da Empresa</label>${logoPreview}</div><p style="color:var(--muted);font-size:13px;margin-top:12px;">Apenas administradores podem editar as configurações da empresa.</p>
   `;
-  return `<div class="page-content"><div class="card"><div class="card-header"><span class="card-title">🏢 Perfil da Empresa</span></div><div style="padding:20px 24px;">${editFields}</div></div></div>`;
+  const usersSection=isAdmin?`
+    <div class="card" style="margin-top:16px;">
+      <div class="card-header">
+        <span class="card-title">🔐 Usuários do Sistema</span>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span style="font-size:11.5px;color:var(--text2);">${employees.length}/${MAX_EMPLOYEES} funcionários</span>
+          <button class="btn btn-primary btn-sm" onclick="openAddSystemUser()" ${canAddUser?'':'disabled title="Limite de usuários atingido"'}>+ Novo Usuário</button>
+        </div>
+      </div>
+      ${!canAddUser&&employees.length>=MAX_EMPLOYEES?`<div style="background:var(--bg2);border-left:3px solid var(--amber);padding:8px 12px;font-size:12px;color:var(--text2);margin:0 16px 12px;">⚠️ Limite de usuários atingido para o plano atual (${MAX_EMPLOYEES} funcionários + 1 admin)</div>`:''}
+      <div class="tw"><table>
+        <tr><th>Nome</th><th>Email</th><th>Perfil</th><th>Ações</th></tr>
+        ${sysUsers.map(u=>`<tr>
+          <td><div style="display:flex;align-items:center;gap:8px;"><div class="avatar" style="width:26px;height:26px;font-size:10px;">${u.initials||initialsFromName(u.name)}</div><span style="font-weight:500">${esc(u.name)}</span>${Number(u.id)===Number(S.currentUser?.id)?'<span style="font-size:10px;background:var(--glow);color:var(--accent2);border-radius:4px;padding:1px 5px;">Você</span>':''}</div></td>
+          <td style="font-size:11.5px;color:var(--text2)">${esc(u.email)}</td>
+          <td><span class="badge ${roleNorm(u.role)==='admin'?'b-purple':roleNorm(u.role)==='manager'?'b-blue':'b-gray'}">${roleLabel(u.role)}</span></td>
+          <td>${Number(u.id)!==Number(S.currentUser?.id)&&roleNorm(u.role)!=='admin'?`<button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="removeSystemUser(${u.id})">Remover</button>`:'—'}</td>
+        </tr>`).join('')}
+      </table></div>
+      <div style="padding:10px 16px;font-size:11px;color:var(--text3);border-top:1px solid var(--border);">🔒 LGPD: Dados de usuários utilizados apenas para acesso à plataforma. Isolados por empresa.</div>
+    </div>
+  `:'';
+  return `<div class="page-content"><div class="card"><div class="card-header"><span class="card-title">🏢 Perfil da Empresa</span></div><div style="padding:20px 24px;">${editFields}</div></div>${usersSection}</div>`;
 }
 
 function handleLogoUpload(e){
@@ -275,12 +326,13 @@ function saveConfig(){
   DB.company.cnpj=document.getElementById('cfg-cnpj').value.trim();
   DB.company.phone=document.getElementById('cfg-phone').value.trim();
   DB.company.email=document.getElementById('cfg-email').value.trim();
+  DB.company.city=document.getElementById('cfg-city').value.trim();
   DB.company.address=document.getElementById('cfg-address').value.trim();
   DB.company.specialties=document.getElementById('cfg-specialties').value.trim();
   const idx=DB_ALL.companies.findIndex(c=>c.id===Number(S.companyId||1));
   if(idx>=0)Object.assign(DB_ALL.companies[idx],{
     name:DB.company.name,owner:DB.company.owner,cnpj:DB.company.cnpj,
-    phone:DB.company.phone,email:DB.company.email,address:DB.company.address,
+    phone:DB.company.phone,email:DB.company.email,city:DB.company.city,address:DB.company.address,
     specialties:DB.company.specialties,
   });
   saveDB();
@@ -296,6 +348,7 @@ const DB = {
     name:'MAIS EVENTOS',
     owner:'Carlos Henrique Souza de Paula',
     cnpj:'62.275.174/0001-14',
+    city:'Anápolis/GO',
     address:'Rua Daniel da Cunha Telles, QD 18 Lt 11A - Residencial Arco-Iris, Anápolis/GO, CEP: 75.100-030',
     phone:'(62) 99143-0000',
     email:'contato@maiseventos.com',
@@ -507,6 +560,7 @@ function normalizeMultiTenantStore(data){
       name:c.name||'Empresa 1',
       owner:c.owner||'',
       cnpj:c.cnpj||'',
+      city:c.city||'',
       address:c.address||'',
       phone:c.phone||'',
       email:c.email||'',
@@ -591,6 +645,78 @@ function requireRole(allowed,msg='Sem permissão para esta ação.'){
   return false;
 }
 
+function isCompanyOwner(){
+  return currentRole()==='admin';
+}
+
+function getEventProfitabilityRows(){
+  const rec=(DB.finance?.rec||[]).map(r=>normalizeFinanceEntry(r,'rec'));
+  const pay=(DB.finance?.pay||[]).map(p=>normalizeFinanceEntry(p,'pay'));
+
+  const events=(DB.events||[]);
+  const baseRows=events.map(ev=>{
+    const eventReceivables=rec.filter(item=>Number(item.eid)===Number(ev.id));
+    const eventPayables=pay.filter(item=>Number(item.eid)===Number(ev.id));
+    const plannedRevenue=eventReceivables.reduce((acc,item)=>acc+Number(item.val||0),0)||Math.max(0,Number(ev.value||0));
+    const receivedRevenue=eventReceivables
+      .filter(item=>item.status==='recebido')
+      .reduce((acc,item)=>acc+Number(item.val||0),0);
+    const directCosts=eventPayables.reduce((acc,item)=>acc+Number(item.val||0),0);
+    const paidCosts=eventPayables
+      .filter(item=>item.status==='pago')
+      .reduce((acc,item)=>acc+Number(item.val||0),0);
+    const consumableCosts=Math.max(0,Number(ev.consumablesTotalCost||0));
+    const equipmentIds=new Set(
+      [
+        ...(Array.isArray(ev.equip)?ev.equip:[]),
+        ...(Array.isArray(ev.extraEquipPlan)?ev.extraEquipPlan.map(item=>item.eqId):[]),
+      ].map(id=>Number(id)).filter(Number.isFinite)
+    );
+
+    return {
+      event:ev,
+      plannedRevenue,
+      receivedRevenue,
+      directCosts,
+      paidCosts,
+      consumableCosts,
+      temporaryRentalAllocated:0,
+      indirectAllocated:0,
+      equipmentIds,
+    };
+  });
+
+  const revenueBase=baseRows.reduce((acc,row)=>acc+Math.max(0,row.plannedRevenue),0);
+  const eventCount=Math.max(1,baseRows.length);
+
+  // Exclude per-event temp-rental entries (eid set) from the global proportional allocation to avoid double-counting
+  const tempRentalPayables=pay.filter(item=>item.type==='temp-rental'&&Number(item.equipId)&&!Number(item.eid||0));
+  tempRentalPayables.forEach(entry=>{
+    const relatedRows=baseRows.filter(row=>row.equipmentIds.has(Number(entry.equipId)));
+    if(!relatedRows.length)return;
+    const share=Number(entry.val||0)/relatedRows.length;
+    relatedRows.forEach(row=>{row.temporaryRentalAllocated+=share;});
+  });
+
+  return baseRows
+    .map(row=>{
+      const totalPlannedCost=row.directCosts+row.consumableCosts+row.temporaryRentalAllocated+row.indirectAllocated;
+      const totalPaidCost=row.paidCosts+row.consumableCosts+row.temporaryRentalAllocated+row.indirectAllocated;
+      const projectedProfit=row.plannedRevenue-totalPlannedCost;
+      const realizedProfit=row.receivedRevenue-totalPaidCost;
+
+      return {
+        ...row,
+        totalPlannedCost,
+        totalPaidCost,
+        projectedProfit,
+        realizedProfit,
+        marginPct:row.plannedRevenue>0?(projectedProfit/row.plannedRevenue)*100:null,
+      };
+    })
+    .sort((a,b)=>startTsOfEvent(b.event)-startTsOfEvent(a.event));
+}
+
 // ═══════════════════════════════════════════════════════════
 // STATE
 // ═══════════════════════════════════════════════════════════
@@ -598,10 +724,13 @@ let S = {
   page:'login',
   in:false,
   modal:null,
+  sidebarCollapsed:false,
+  userMenuOpen:false,
   tabs:{agenda:'lista',clType:'saida',checklistEventFilter:'agendados',estoque:'permanentes',estoqueCategoria:'todos',estoqueConsCategoria:'todos',finRec:'a_receber',finPay:'a_pagar',manutencao:'ativos',objCompras:'planejado'},
   selEv:1,
   selEq:null,
   selCons:null,
+  resultEventId:null,
   agendaDay:null,
   agendaEventDetailId:null,
   viewClientId:null,
@@ -777,6 +906,13 @@ async function updatePasswordFromRecovery(){
     render();
     return;
   }
+  if(!isStrongPassword(newPassword)){
+    const strength=getPasswordStrength(newPassword);
+    S.authRecovery.resetError=`Senha fraca. Use maiúsculas, minúsculas, números e caracteres especiais. Força: ${strength.label}`;
+    S.authRecovery.resetMessage='';
+    render();
+    return;
+  }
   if(newPassword!==confirmPassword){
     S.authRecovery.resetError='As senhas não conferem.';
     S.authRecovery.resetMessage='';
@@ -853,6 +989,7 @@ function loadDB(){
       localStorage.setItem('eventpro_clists_all',JSON.stringify(CLISTS_ALL));
     }
 
+    S.sidebarCollapsed=localStorage.getItem('eventpro_sidebar_collapsed')==='1';
     const sessionUserId=Number(localStorage.getItem('eventpro_session_user')||0);
     const sessionUser=DB_ALL.users.find(u=>Number(u.id)===sessionUserId);
     if(sessionUser){
@@ -877,7 +1014,23 @@ function toast(msg,t='ok'){
   setTimeout(()=>el.classList.add('show'),10);
   setTimeout(()=>{el.classList.remove('show');setTimeout(()=>el.remove(),400);},3000);
 }
-function nav(p){S.page=p;render();}
+function nav(p){S.page=p;S.userMenuOpen=false;render();}
+function toggleSidebar(){
+  S.sidebarCollapsed=!S.sidebarCollapsed;
+  if(S.sidebarCollapsed)S.userMenuOpen=false;
+  localStorage.setItem('eventpro_sidebar_collapsed',S.sidebarCollapsed?'1':'0');
+  render();
+}
+function toggleUserMenu(ev){
+  if(ev)ev.stopPropagation();
+  S.userMenuOpen=!S.userMenuOpen;
+  render();
+}
+function userMenuAction(action){
+  S.userMenuOpen=false;
+  if(action==='logout'){logout();return;}
+  nav(action);
+}
 function openM(id){S.modal=id;render();}
 function closeM(){S.modal=null;render();}
 function fmtVal(v){return'R$ '+v.toLocaleString('pt-BR');}
@@ -891,6 +1044,27 @@ function fmtDateBR(iso){
   if(!iso)return'';
   const [y,m,d]=String(iso).split('-');
   return y&&m&&d?`${d}/${m}/${y}`:iso;
+}
+
+function extractCityUFFromAddress(address){
+  const text=String(address||'').trim();
+  if(!text)return '';
+  const normalized=text.replace(/\s+/g,' ');
+  const slashMatch=normalized.match(/([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s.'-]{1,})\s*\/\s*([A-Za-z]{2})(?=\b|[^A-Za-z])/u);
+  if(slashMatch)return `${slashMatch[1].trim()}/${slashMatch[2].toUpperCase()}`;
+  const dashMatch=normalized.match(/([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s.'-]{1,})\s*-\s*([A-Za-z]{2})(?=\b|[^A-Za-z])/u);
+  if(dashMatch)return `${dashMatch[1].trim()}/${dashMatch[2].toUpperCase()}`;
+  return '';
+}
+
+function getCompanyCityLabel(company){
+  const explicit=String(company?.city||'').trim();
+  if(explicit)return explicit;
+  return extractCityUFFromAddress(company?.address||'');
+}
+
+function getCompanyCityOrFallback(company,fallback='Cidade/UF'){
+  return getCompanyCityLabel(company)||fallback;
 }
 
 function fmtRelativeDayLabel(iso){
@@ -981,6 +1155,36 @@ function closeEventDetail(){
   render();
 }
 
+function openEventProfitability(eventId){
+  if(!isCompanyOwner()){
+    toast('Somente o dono da empresa pode visualizar o desempenho financeiro do evento.','err');
+    return;
+  }
+  S.resultEventId=Number(eventId)||null;
+  S.agendaEventDetailId=null;
+  nav('resultados_evento');
+}
+
+function clearEventProfitabilityFilter(){
+  S.resultEventId=null;
+  render();
+}
+
+function renderEventNotesPreview(ev,maxLen=140){
+  const notes=String(ev?.notes||'').trim();
+  if(!notes)return '';
+  const compact=notes.replace(/\s+/g,' ');
+  const shown=compact.length>maxLen?`${compact.slice(0,maxLen-1)}…`:compact;
+  return `<div style="font-size:11.5px;color:var(--text2);margin-bottom:8px;">📝 ${esc(shown)}</div>`;
+}
+
+function renderEventNotesBlock(ev){
+  const notes=String(ev?.notes||'').trim();
+  if(!notes)return '<div><strong>Observações:</strong> -</div>';
+  const html=esc(notes).replace(/\n/g,'<br>');
+  return `<div><strong>Observações:</strong><br>${html}</div>`;
+}
+
 function renderEventDetailDrawer(){
   if(!S.agendaEventDetailId)return'';
   const ev=getTenantEvents().find(e=>e.id===Number(S.agendaEventDetailId));
@@ -1002,12 +1206,13 @@ function renderEventDetailDrawer(){
   const consumablesTotal=consumablesPlan.reduce((a,b)=>a+Number(b.totalCost||0),0);
 
   return `<div class="drawer-ov open" onclick="if(event.target===this)closeEventDetail()"><div class="drawer" onclick="event.stopPropagation()">
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;"><div style="font-family:var(--fh);font-size:16px;font-weight:700;flex:1;">${ev.name}</div><button class="btn btn-ghost btn-sm" onclick="openEditEvent(${ev.id})">✏️ Editar</button><button class="btn btn-ghost btn-icon" onclick="closeEventDetail()" style="font-size:19px;border:none;line-height:1;">×</button></div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;"><div style="font-family:var(--fh);font-size:16px;font-weight:700;flex:1;">${ev.name}</div>${isCompanyOwner()?`<button class="btn btn-ghost btn-sm" onclick="openEventProfitability(${ev.id})">📈 Resultado</button>`:''}<button class="btn btn-ghost btn-sm" onclick="openEditEvent(${ev.id})">✏️ Editar</button><button class="btn btn-ghost btn-icon" onclick="closeEventDetail()" style="font-size:19px;border:none;line-height:1;">×</button></div>
     <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;"><span class="badge b-blue">${ev.cat||'Evento'}</span><span class="badge ${ev.status==='confirmado'?'b-green':ev.status==='proposta'?'b-amber':'b-gray'}">${ev.status||'sem status'}</span></div>
     <div class="card" style="margin-bottom:10px;"><div class="card-body" style="padding:12px;display:flex;flex-direction:column;gap:7px;">
       <div><strong>Cliente:</strong> ${ev.client||'-'}</div>
       <div><strong>Local:</strong> ${ev.venue||'-'}</div>
       <div><strong>Início:</strong> ${fmtDateBR(ev.date)} ${ev.time||'00:00'}</div>
+      ${renderEventNotesBlock(ev)}
       <div><strong>Custo consumíveis:</strong> ${fmtVal(consumablesTotal)}</div>
     </div></div>
     <div class="card"><div class="card-header"><span class="card-title">Equipamentos Vinculados</span></div><div class="card-body" style="padding-top:6px;">${equipmentRows||'<div class="empty" style="padding:16px 8px;">Nenhum equipamento vinculado</div>'}</div></div>
@@ -1032,6 +1237,56 @@ function isValidCPF(cpf){
   const d1=calc(d.slice(0,9),10);
   const d2=calc(d.slice(0,10),11);
   return d1===Number(d[9])&&d2===Number(d[10]);
+}
+
+function isStrongPassword(pwd){
+  if(!pwd||pwd.length<8)return false;
+  const hasUpper=/[A-Z]/.test(pwd);
+  const hasLower=/[a-z]/.test(pwd);
+  const hasDigit=/\d/.test(pwd);
+  const hasSpecial=/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(pwd);
+  return (hasUpper&&hasLower&&hasDigit)||(hasUpper&&hasLower&&hasSpecial)||(hasUpper&&hasDigit&&hasSpecial)||(hasLower&&hasDigit&&hasSpecial);
+}
+
+function getPasswordStrength(pwd){
+  if(!pwd)return {score:0,label:'Nenhuma'};
+  if(pwd.length<8)return {score:1,label:'Muito fraca'};
+  let strength=0;
+  if(/[a-z]/.test(pwd))strength++;
+  if(/[A-Z]/.test(pwd))strength++;
+  if(/\d/.test(pwd))strength++;
+  if(/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(pwd))strength++;
+  const labels=['','Fraca','Média','Forte','Muito forte'];
+  return {score:strength,label:labels[strength]||'Desconhecida'};
+}
+
+  function updatePasswordStrengthDisplay(inputId,displayId){
+    const pwd=document.getElementById(inputId)?.value||'';
+    const displayEl=document.getElementById(displayId);
+    if(!displayEl)return;
+    const strength=getPasswordStrength(pwd);
+    const colors=['','#ef4444','#f59e0b','#3b82f6','#10b981'];
+    const color=colors[strength.score]||colors[0];
+    displayEl.style.color=color;
+    displayEl.textContent=strength.label?`Força da senha: ${strength.label}`:'';
+  }
+
+function isValidCNPJ(cnpj){
+  const d=onlyDigits(cnpj);
+  if(d.length!==14)return false;
+  if(/^(\d)\1{13}$/.test(d))return false;
+  const calc=(base,factor)=>{
+    let sum=0;
+    for(let i=0;i<base.length;i++){
+      sum+=Number(base[i])*factor;
+      factor=(factor===2?9:factor-1);
+    }
+    const r=sum%11;
+    return r<2?0:11-r;
+  };
+  const d1=calc(d.slice(0,12),5);
+  const d2=calc(d.slice(0,13),6);
+  return d1===Number(d[12])&&d2===Number(d[13]);
 }
 
 function formatCPF(cpf){
@@ -1148,9 +1403,11 @@ function openContractDoc(eventId){
   const companyName=co.name||'Empresa';
   const companyOwner=co.owner||'Responsável';
   const companyCnpj=co.cnpj||'—';
+  const companyCity=getCompanyCityOrFallback(co,'Cidade/UF');
   const companyAddress=co.address||'—';
   const companyPhone=co.phone||'—';
   const companyEmail=co.email||'';
+  const issueDate=new Date().toLocaleDateString('pt-BR',{day:'numeric',month:'long',year:'numeric'});
 
   const sigSvg=`<svg xmlns="http://www.w3.org/2000/svg" width="420" height="90" viewBox="0 0 420 90"><rect width="100%" height="100%" fill="white"/><text x="12" y="58" font-family="cursive" font-size="36" fill="#111827">${esc(companyOwner)}</text></svg>`;
   const sigUri='data:image/svg+xml;charset=UTF-8,'+encodeURIComponent(sigSvg);
@@ -1192,7 +1449,7 @@ function openContractDoc(eventId){
 </style>
 </head>
 <body>
-  <div class="tools"><button onclick="window.print()">Imprimir / Salvar PDF</button></div>
+  <div class="tools"><button onclick="window.print()">Imprimir / Salvar PDF</button><button onclick="closeDocumentView()">Fechar</button></div>
   <article class="doc">
     <header class="head">
       <div>
@@ -1237,7 +1494,7 @@ function openContractDoc(eventId){
 
       <h2>5. Assinaturas</h2>
       <p>Por estarem de pleno acordo com os termos acima, as partes assinam o presente instrumento em duas vias de igual teor e forma.</p>
-      <div class="city-date">Anapolis-GO, 11 de novembro de 2025.</div>
+      <div class="city-date">${esc(companyCity)}, ${esc(issueDate)}.</div>
 
       <div class="signatures">
         <div class="sig">
@@ -1286,6 +1543,19 @@ function openContractDoc(eventId){
       ${esc(companyPhone)}${companyEmail?` · ${esc(companyEmail)}`:''}
     </footer>
   </article>
+<script>
+function closeDocumentView(){
+  try{ if(window.history.length>1){ window.history.back(); return; } }catch(e){}
+  try{ window.close(); }catch(e){}
+  setTimeout(function(){
+    if(window.opener&&!window.opener.closed){
+      window.location.href='about:blank';
+      return;
+    }
+    window.location.href='/';
+  },120);
+}
+<\/script>
 </body>
 </html>`;
 
@@ -1312,6 +1582,7 @@ function generateProposalPDF(p){
   const cl=DB.clients.find(c=>c.name===p.client);
   const nomeCLean=(p.event||'orcamento').replace(/[^a-zA-Z0-9]/g,'_').slice(0,30);
   const dataCriacao=new Date().toLocaleDateString('pt-BR');
+  const companyCity=getCompanyCityOrFallback(co,'Cidade/UF');
   const dataEvento=(p.date||'').trim()?(p.endDate&&p.endDate!==p.date?`${p.date} a ${p.endDate}`:p.date):'Não informada';
   const serviceCategories=Array.isArray(p.serviceCategories)&&p.serviceCategories.length
     ?p.serviceCategories
@@ -1320,13 +1591,19 @@ function generateProposalPDF(p){
       :[])
   ;
   const servicosTexto=serviceCategories.length?serviceCategories.join(', '):'Serviços a definir';
-  const bulletItems=Array.isArray(p.equipPlan)&&p.equipPlan.length
+  const equipBulletItems=Array.isArray(p.equipPlan)&&p.equipPlan.length
     ?p.equipPlan.map(plan=>{
       const eq=DB.equipment.find(e=>e.id===Number(plan.eqId));
       const nome=eq?.name||`Equipamento ${plan.eqId}`;
       const qty=Math.max(1,Number(plan.qty||1));
       return `${qty}x ${nome}`;
     })
+    :[];
+  const consumableBulletItems=Array.isArray(p.consumablePlan)&&p.consumablePlan.length
+    ?p.consumablePlan.map(item=>`${Math.max(1,Number(item.qty||1))}x ${item.name||'Consumível'}`)
+    :[];
+  const bulletItems=(equipBulletItems.length||consumableBulletItems.length)
+    ?[...equipBulletItems,...consumableBulletItems]
     :(Array.isArray(p.items)&&p.items.length
       ?p.items.map(item=>typeof item==='string'?item:(item?.name||'')).filter(Boolean)
       :[]);
@@ -1367,11 +1644,12 @@ p{margin:0 0 8px;text-align:justify;}
 <div class="toolbar">
   <span>🧾 Orçamento — ${esc(p.event||'Evento')}</span>
   <button class="tbtn" onclick="window.print()">🖨️ Salvar como PDF</button>
+  <button class="tbtn" onclick="closeDocumentView()">↩ Fechar</button>
   <button class="tbtn share" onclick="(async()=>{try{await navigator.share({title:'Orçamento ${esc(p.event||'Evento')}',text:'Segue o orçamento de ${esc(p.client||'Cliente')} para ${esc(p.event||'evento')}.',url:location.href});}catch(e){if(e.name!=='AbortError'){navigator.clipboard.writeText(location.href).then(()=>alert('Link copiado!')).catch(()=>alert('Compartilhe manualmente após salvar como PDF.'));}}})()">📤 Compartilhar</button>
 </div>
 
 ${logoB64?`<img class="top-logo" src="${logoB64}" alt="${esc(co.name||'Empresa')}">`:''}
-<div class="top-date">Anápolis-GO, ${dataCriacao}</div>
+<div class="top-date">${esc(companyCity)}, ${dataCriacao}</div>
 
 <h1>O R Ç A M E N T O</h1>
 
@@ -1401,6 +1679,19 @@ ${logoB64?`<img class="top-logo" src="${logoB64}" alt="${esc(co.name||'Empresa')
   <div>${esc(co.address||'—')}</div>
   <div>${esc(co.phone||'—')}${co.email?` · ${esc(co.email)}`:''}</div>
 </div>
+<script>
+function closeDocumentView(){
+  try{ if(window.history.length>1){ window.history.back(); return; } }catch(e){}
+  try{ window.close(); }catch(e){}
+  setTimeout(function(){
+    if(window.opener&&!window.opener.closed){
+      window.location.href='about:blank';
+      return;
+    }
+    window.location.href='/';
+  },120);
+}
+<\/script>
 </body>
 </html>`;
 
@@ -1426,6 +1717,7 @@ function generateContractPDF(ev,contract,cl){
   const dataFimStr=fmtDate(dataFim);
   const dataEvento=dataStr+(dataFimStr!==dataStr?` a ${dataFimStr}`:'');
   const hojeExtenso=new Date().toLocaleDateString('pt-BR',{day:'numeric',month:'long',year:'numeric'});
+  const companyCity=getCompanyCityOrFallback(co,'Cidade/UF');
 
   const clienteNome=esc(contract.clientName||ev.client);
   const clienteDoc=contract.clientDoc||(cl?.doc||'');
@@ -1465,6 +1757,7 @@ h1{font-size:13px;text-align:center;text-transform:uppercase;font-weight:bold;ma
 <div class="toolbar">
   <span>📑 Contrato — ${esc(ev.name)}</span>
   <button class="tbtn" onclick="window.print()">🖨️ Salvar como PDF</button>
+  <button class="tbtn" onclick="closeDocumentView()">↩ Fechar</button>
   <button class="tbtn share" onclick="(async()=>{try{const r=await fetch(location.href);const b=await r.blob();const f=new File([b],'Contrato_${nomeCLean}.html',{type:'text/html'});if(navigator.canShare&&navigator.canShare({files:[f]})){await navigator.share({title:'Contrato ${esc(ev.name)}',files:[f]});return;}await navigator.share({title:'Contrato ${esc(ev.name)}',text:'Segue o contrato para o evento ${esc(ev.name)}. Abra no navegador e salve como PDF.'});}catch(e){if(e.name!=='AbortError'){navigator.clipboard.writeText(location.href).then(()=>alert('Link copiado! Cole no WhatsApp ou e-mail.')).catch(()=>alert('Para compartilhar: use Ctrl+P (Salvar como PDF) e então envie o arquivo.'));}}})()" >📤 Compartilhar</button>
 </div>
 <img src="${logoB64}" alt="${esc(co.name||'Empresa')}" style="display:block;max-width:140px;width:100%;margin:0 auto 14px;page-break-inside:avoid;">
@@ -1495,11 +1788,11 @@ h1{font-size:13px;text-align:center;text-transform:uppercase;font-weight:bold;ma
 
 <div class="clause"><span class="clause-title">Cláusula 9ª.</span> Este contrato obriga as partes, seus herdeiros e sucessores.</div>
 
-<div class="clause"><span class="clause-title">Cláusula 10ª.</span> Para dirimir quaisquer controvérsias oriundas deste contrato, as partes elegem o foro da comarca de Anápolis/GO.</div>
+<div class="clause"><span class="clause-title">Cláusula 10ª.</span> Para dirimir quaisquer controvérsias oriundas deste contrato, as partes elegem o foro da comarca de ${esc(companyCity)}.</div>
 
 <p style="margin-top:20px;text-align:justify;">Por estarem assim justos e contratados, firmam o presente instrumento em duas vias de igual teor juntamente com 2 (duas) testemunhas.</p>
 
-<div class="date-line">Anápolis/GO, ${hojeExtenso}.</div>
+<div class="date-line">${esc(companyCity)}, ${hojeExtenso}.</div>
 
 <div class="signatures">
   <div class="sig-block">
@@ -1524,6 +1817,19 @@ h1{font-size:13px;text-align:center;text-transform:uppercase;font-weight:bold;ma
   </div>
 </div>
 
+<script>
+function closeDocumentView(){
+  try{ if(window.history.length>1){ window.history.back(); return; } }catch(e){}
+  try{ window.close(); }catch(e){}
+  setTimeout(function(){
+    if(window.opener&&!window.opener.closed){
+      window.location.href='about:blank';
+      return;
+    }
+    window.location.href='/';
+  },120);
+}
+<\/script>
 </body>
 </html>`;
 
@@ -1646,6 +1952,62 @@ function generateContractReceivables(contract,ev){
   return{created:parcels.length,total:parcels.length};
 }
 
+function generateConsumablePayable(ev){
+  if(!ev)return 0;
+  const consumablesPlan=Array.isArray(ev.consumables)?ev.consumables:[];
+  if(!consumablesPlan.length)return 0;
+  const totalCost=consumablesPlan.reduce((a,b)=>a+Number(b.totalCost||0),0);
+  if(totalCost<=0)return 0;
+  const alreadyExists=(DB.finance?.pay||[]).some(p=>
+    p.type==='consumables-pay'&&Number(p.eid)===Number(ev.id)
+  );
+  if(alreadyExists)return 0;
+  DB.finance.pay.push({
+    id:nextId(DB.finance.pay),
+    desc:`Consumíveis do evento ${ev.name}`,
+    eid:Number(ev.id),
+    val:totalCost,
+    due:ev.date||new Date().toISOString().slice(0,10),
+    data_vencimento:ev.date||new Date().toISOString().slice(0,10),
+    status:'a_pagar',
+    type:'consumables-pay',
+    empresa_id:Number(ev.empresa_id||S.companyId||1),
+  });
+  return 1;
+}
+
+function generateTempRentalPayable(ev){
+  if(!ev)return 0;
+  const plan=getEventLoadPlan(ev.id);
+  const tempItems=plan
+    .map(row=>{const eq=DB.equipment.find(e=>Number(e.id)===Number(row.eqId));return eq&&eq.temporary?{eq,qty:Math.max(1,Number(row.qty||1))}:null;})
+    .filter(Boolean);
+  if(!tempItems.length)return 0;
+  let created=0;
+  tempItems.forEach(({eq,qty})=>{
+    const alreadyExists=(DB.finance?.pay||[]).some(p=>
+      p.type==='temp-rental'&&Number(p.eid)===Number(ev.id)&&Number(p.equipId)===Number(eq.id)
+    );
+    if(alreadyExists)return;
+    const rentalCost=Math.max(0,Number(eq.rentalCost||0));
+    if(rentalCost<=0)return;
+    DB.finance.pay.push({
+      id:nextId(DB.finance.pay),
+      desc:`Aluguel terceiro — ${eq.name} (${qty}x) · ${ev.name}`,
+      eid:Number(ev.id),
+      val:rentalCost*qty,
+      due:ev.date||new Date().toISOString().slice(0,10),
+      data_vencimento:ev.date||new Date().toISOString().slice(0,10),
+      status:'a_pagar',
+      type:'temp-rental',
+      equipId:Number(eq.id),
+      empresa_id:Number(ev.empresa_id||S.companyId||1),
+    });
+    created++;
+  });
+  return created;
+}
+
 function updateRecStatus(recId,status){
   if(!requireRole(['admin','manager'],'Apenas admin/manager podem alterar recebimentos.'))return;
   const rec=DB.finance.rec.find(r=>r.id===recId);
@@ -1745,6 +2107,174 @@ function addFinancePay(){
 
   saveDB();
   toast('Conta a pagar adicionada!');
+  render();
+  return true;
+}
+
+function getEventExtraCostCategoryLabel(category){
+  return {
+    funcionarios:'Funcionários',
+    combustivel:'Combustível',
+    alimentacao:'Alimentação',
+    pedagio:'Pedágio',
+    hospedagem:'Hospedagem',
+    outro:'Outro custo',
+  }[String(category||'').toLowerCase()]||'Outro custo';
+}
+
+function getEventExtraCostCategoryOptions(selected){
+  return ['funcionarios','combustivel','alimentacao','pedagio','hospedagem','outro']
+    .map(category=>`<option value="${category}" ${category===selected?'selected':''}>${getEventExtraCostCategoryLabel(category)}</option>`)
+    .join('');
+}
+
+function getEventExtraCostPayables(eventId){
+  return (DB.finance?.pay||[])
+    .filter(item=>item.type==='event-extra-cost'&&Number(item.eid)===Number(eventId))
+    .sort((a,b)=>(Number(a.id)||0)-(Number(b.id)||0));
+}
+
+function buildEventExtraCostRowHtml(prefix,rowKey,draft){
+  const data=draft||{};
+  const category=String(data.category||'funcionarios').toLowerCase();
+  const desc=String(data.desc||'');
+  const val=Number(data.val||0);
+  const due=String(data.due||data.data_vencimento||isoToday()).slice(0,10);
+  const status=data.status==='pago'?'pago':'a_pagar';
+  const existingId=Number(data.id||0);
+  return `<div id="${prefix}CostRow-${rowKey}" data-event-cost-row="${prefix}" data-row-key="${rowKey}" style="border:1px solid var(--border);border-radius:10px;padding:10px;display:grid;gap:8px;">
+    <input id="${prefix}CostId-${rowKey}" type="hidden" value="${existingId||''}">
+    <div class="grid g2">
+      <div class="fg"><label class="fl">Categoria</label><select id="${prefix}CostCategory-${rowKey}" class="fc">${getEventExtraCostCategoryOptions(category)}</select></div>
+      <div class="fg"><label class="fl">Descrição</label><input id="${prefix}CostDesc-${rowKey}" class="fc" placeholder="Ex: Equipe extra, gasolina, almoço da equipe" value="${esc(desc)}"></div>
+    </div>
+    <div class="grid g3">
+      <div class="fg"><label class="fl">Valor (R$)</label><input id="${prefix}CostVal-${rowKey}" type="number" min="0" step="0.01" class="fc" value="${val>0?val:''}"></div>
+      <div class="fg"><label class="fl">Vencimento</label><input id="${prefix}CostDue-${rowKey}" type="date" class="fc" value="${esc(due)}"></div>
+      <div class="fg"><label class="fl">Status</label><select id="${prefix}CostStatus-${rowKey}" class="fc"><option value="a_pagar" ${status==='a_pagar'?'selected':''}>a_pagar</option><option value="pago" ${status==='pago'?'selected':''}>pago</option></select></div>
+    </div>
+    <div style="display:flex;justify-content:flex-end;"><button type="button" class="btn btn-ghost btn-sm" style="color:var(--red);border-color:rgba(255,74,74,.2);" onclick="removeEventExtraCostRow('${prefix}','${rowKey}')">Remover custo</button></div>
+  </div>`;
+}
+
+function renderEventExtraCostEditor(prefix,ev){
+  const rows=getEventExtraCostPayables(ev.id);
+  const list=rows.length
+    ?rows.map(item=>buildEventExtraCostRowHtml(prefix,item.id,item)).join('')
+    :buildEventExtraCostRowHtml(prefix,`new-${Date.now()}`,{category:'funcionarios',due:ev.date||isoToday()});
+  return `<div id="${prefix}CostList" style="display:flex;flex-direction:column;gap:8px;">${list}</div>`;
+}
+
+function addEventExtraCostRow(prefix){
+  const wrap=document.getElementById(`${prefix}CostList`);
+  if(!wrap)return;
+  const rowKey=`new-${Date.now()}-${Math.floor(Math.random()*1000)}`;
+  wrap.insertAdjacentHTML('beforeend',buildEventExtraCostRowHtml(prefix,rowKey,{category:'funcionarios',due:isoToday()}));
+}
+
+function removeEventExtraCostRow(prefix,rowKey){
+  const row=document.getElementById(`${prefix}CostRow-${rowKey}`);
+  if(row)row.remove();
+}
+
+function collectEventExtraCosts(prefix){
+  const rows=Array.from(document.querySelectorAll(`[data-event-cost-row="${prefix}"]`));
+  const costs=[];
+  for(const row of rows){
+    const rowKey=row.dataset.rowKey;
+    const category=document.getElementById(`${prefix}CostCategory-${rowKey}`)?.value||'outro';
+    const desc=document.getElementById(`${prefix}CostDesc-${rowKey}`)?.value.trim()||'';
+    const val=Number(document.getElementById(`${prefix}CostVal-${rowKey}`)?.value||0);
+    const due=document.getElementById(`${prefix}CostDue-${rowKey}`)?.value||'';
+    const status=document.getElementById(`${prefix}CostStatus-${rowKey}`)?.value==='pago'?'pago':'a_pagar';
+    const blank=!desc&&val<=0;
+    if(blank)continue;
+    if(val<=0)return {error:'Informe um valor válido para os custos extras do evento.'};
+    if(!due)return {error:'Informe a data de vencimento dos custos extras do evento.'};
+    costs.push({
+      desc:desc||getEventExtraCostCategoryLabel(category),
+      val,
+      due,
+      data_vencimento:due,
+      status,
+      category,
+      type:'event-extra-cost',
+      eid:Number(S.selEv||0),
+      empresa_id:Number(S.companyId||1),
+    });
+  }
+  return {costs};
+}
+
+function replaceEventExtraCosts(eventId,costs){
+  DB.finance.pay=DB.finance.pay.filter(item=>!(item.type==='event-extra-cost'&&Number(item.eid)===Number(eventId)));
+  (costs||[]).forEach(cost=>{
+    DB.finance.pay.push({
+      id:nextId(DB.finance.pay),
+      ...cost,
+      eid:Number(eventId),
+      empresa_id:Number(S.companyId||1),
+    });
+  });
+}
+
+function openResultEventCosts(eventId){
+  S.resultEventId=Number(eventId)||null;
+  render();
+}
+
+function getEventCostTypeLabel(item){
+  const type=String(item?.type||'').toLowerCase();
+  if(type==='consumables-pay')return 'Consumíveis';
+  if(type==='temp-rental')return 'Terceiros';
+  if(type==='event-extra-cost')return getEventExtraCostCategoryLabel(item?.category);
+  if(type==='maintenance')return 'Manutenção';
+  if(type==='manual-pay')return 'Lançamento manual';
+  return 'Custo vinculado';
+}
+
+function getEventCostDetailRows(ev){
+  if(!ev)return [];
+  const pay=(DB.finance?.pay||[])
+    .map(item=>normalizeFinanceEntry(item,'pay'))
+    .filter(item=>Number(item.eid)===Number(ev.id))
+    .map(item=>({
+      label:item.desc||getEventCostTypeLabel(item),
+      typeLabel:getEventCostTypeLabel(item),
+      amount:Math.max(0,Number(item.val||0)),
+      due:String(item.due||item.data_vencimento||''),
+      status:item.status==='pago'?'pago':'a_pagar',
+      badge:item.status==='pago'?'b-green':'b-amber',
+      isSynthetic:false,
+    }))
+    .sort((a,b)=>String(a.due||'').localeCompare(String(b.due||''))||String(a.label).localeCompare(String(b.label)));
+
+  const consumablesTotal=Math.max(0,Number(ev.consumablesTotalCost||0));
+  if(consumablesTotal>0){
+    pay.unshift({
+      label:'Consumíveis planejados do evento',
+      typeLabel:'Consumíveis',
+      amount:consumablesTotal,
+      due:String(ev.date||''),
+      status:'planejado',
+      badge:'b-blue',
+      isSynthetic:true,
+    });
+  }
+
+  return pay;
+}
+
+function saveResultEventCosts(){
+  if(!requireRole(['admin','manager'],'Apenas admin/manager podem editar custos do evento.'))return false;
+  const eventId=Number(S.resultEventId||0);
+  const ev=DB.events.find(item=>Number(item.id)===eventId);
+  if(!ev){toast('Evento não encontrado.','err');return false;}
+  const extraCostBuild=collectEventExtraCosts('resultEvent');
+  if(extraCostBuild.error){toast(extraCostBuild.error,'err');return false;}
+  replaceEventExtraCosts(ev.id,extraCostBuild.costs);
+  saveDB();
+  toast('Custos extras do evento atualizados.');
   render();
   return true;
 }
@@ -1897,15 +2427,19 @@ function updateContractStatus(cid,status){
       ensureChecklistForEvent(ev,proposal||{});
       const after=(clists[ev.id]||[]).length;
       const recRes=generateContractReceivables(c,ev);
+      const consPayCreated=generateConsumablePayable(ev);
+      const tempPayCreated=generateTempRentalPayable(ev);
       S.selEv=ev.id;
+      const extras=[consPayCreated>0?'consumíveis':null,tempPayCreated>0?'terceiros':null].filter(Boolean);
+      const consMsg=extras.length>0?` + despesa de ${extras.join(' e ')} lançada`:'';
       if(recRes.created>0){
         toast(after>before
-          ?`Contrato aprovado! Checklist criado/atualizado e ${recRes.created} receita(s) lançada(s). ✅`
-          :`Contrato aprovado! ${recRes.created} receita(s) lançada(s) no financeiro. ✅`);
+          ?`Contrato aprovado! Checklist criado/atualizado e ${recRes.created} receita(s) lançada(s)${consMsg}. ✅`
+          :`Contrato aprovado! ${recRes.created} receita(s) lançada(s) no financeiro${consMsg}. ✅`);
       }else{
         toast(after>before
-          ?'Contrato aprovado! Checklist criado/atualizado com itens do orçamento. ✅'
-          :'Contrato aprovado! Checklist já estava completo. ✅');
+          ?`Contrato aprovado! Checklist criado/atualizado com itens do orçamento${consMsg}. ✅`
+          :`Contrato aprovado! Checklist já estava completo${consMsg}. ✅`);
       }
       S.tabs.clType='saida';
       saveDB();
@@ -1979,6 +2513,7 @@ function shareContract(contractId){
 
 function addMaintenanceRecord(){
   if(!requireRole(['admin','manager'],'Apenas admin/manager podem registrar manutenção.'))return false;
+  const companyId=Number(S.companyId||1);
   const equipId=Number(document.getElementById('mEquip')?.value||0);
   const service=document.getElementById('mService')?.value.trim();
   const parts=document.getElementById('mParts')?.value.trim();
@@ -1990,6 +2525,8 @@ function addMaintenanceRecord(){
   const eq=DB.equipment.find(e=>e.id===equipId);
 
   if(!eq){toast('Selecione um equipamento válido.','err');return false;}
+  if(Number(eq.empresa_id||companyId)!==companyId){toast('Equipamento inválido para a empresa atual.','err');return false;}
+  if(eq.temporary){toast('Somente equipamentos permanentes podem ir para manutenção.','err');return false;}
   if(!service||!parts||!provider){toast('Preencha serviço, peças e prestador.','err');return false;}
   if(cost<0){toast('Custo não pode ser negativo.','err');return false;}
 
@@ -2001,7 +2538,7 @@ function addMaintenanceRecord(){
   if(qty>maxAdd){toast(`Quantidade em manutenção excede o disponível (${maxAdd}).`,'err');return false;}
 
   const maintenanceId=nextId(DB.maintenance);
-  DB.maintenance.push({id:maintenanceId,equipId,service,parts,provider,qty,cost,date,status:'pendente',empresa_id:Number(S.companyId||1)});
+  DB.maintenance.push({id:maintenanceId,equipId,equipEmpresaId:companyId,service,parts,provider,qty,cost,date,status:'pendente',empresa_id:companyId});
 
   eq.lastMaintenance=date;
   recalcEquipmentMaintenanceState(equipId);
@@ -2063,29 +2600,180 @@ function updateMaintenanceStatus(maintenanceId,newStatus){
   render();
 }
 
+function pushChecklistItems(bucketKey,tasks){
+  if(!clists[bucketKey])clists[bucketKey]=[];
+  let next=nextId(clists[bucketKey]);
+  (Array.isArray(tasks)?tasks:[]).forEach(task=>{
+    clists[bucketKey].push({
+      id:next++,
+      task:task.task,
+      done:false,
+      type:task.type,
+      ts:null,
+      empresa_id:Number(S.companyId||1),
+      equipmentId:task.equipmentId||null,
+      consumableId:task.consumableId||null,
+      maintenanceId:task.maintenanceId||null,
+      linkedKind:task.linkedKind||null,
+    });
+  });
+  return Math.max(0,next-nextId(clists[bucketKey]));
+}
+
+function buildLinkedEquipmentChecklistTasks(eq,qty){
+  const amount=Math.max(1,Number(qty||1));
+  const label=`${amount}x ${String(eq?.name||'Equipamento').trim()}`;
+  return [
+    {task:`Separar ${label} para saída`,type:'saida',equipmentId:eq.id,linkedKind:'equipment'},
+    {task:`Montar ${label} no evento`,type:'montagem',equipmentId:eq.id,linkedKind:'equipment'},
+    {task:`Desmontar ${label} após o evento`,type:'desmontagem',equipmentId:eq.id,linkedKind:'equipment'},
+    {task:`Conferir entrega de ${label}`,type:'entrega',equipmentId:eq.id,linkedKind:'equipment'},
+  ];
+}
+
+function buildLinkedConsumableChecklistTasks(consumable,qty){
+  const amount=Math.max(1,Number(qty||1));
+  const unit=String(consumable?.unit||'unidade').trim();
+  const pluralUnit=amount>1&&unit!=='unidade'?`${unit}s`:unit;
+  const label=`${amount} ${pluralUnit} de ${String(consumable?.name||'Consumível').trim()}`;
+  return [
+    {task:`Separar ${label} para carga`,type:'saida',consumableId:consumable.id,linkedKind:'consumable'},
+    {task:`Usar/aplicar ${label} na montagem`,type:'montagem',consumableId:consumable.id,linkedKind:'consumable'},
+  ];
+}
+
+function buildMaintenanceChecklistTasks(record){
+  const eq=DB.equipment.find(item=>Number(item.id)===Number(record?.equipId));
+  const eqName=String(eq?.name||'Equipamento').trim();
+  const service=String(record?.service||'Manutenção').trim();
+  return [{
+    task:`Acompanhar manutenção: ${service} · ${eqName}`,
+    type:'operacional',
+    maintenanceId:Number(record.id),
+    equipmentId:eq?.id||null,
+    linkedKind:'maintenance',
+  }];
+}
+
+function buildTaskLinkOptionsHtml(type){
+  if(type==='operacional')return '<option value="none">Manual</option><option value="maintenance">Vincular manutenção</option>';
+  return '<option value="none">Manual</option><option value="stock">Vincular item do estoque</option>';
+}
+
+function onAddTaskTypeChange(){
+  const type=document.getElementById('addTaskType')?.value||'saida';
+  const linkKindEl=document.getElementById('addTaskLinkKind');
+  if(linkKindEl){
+    linkKindEl.innerHTML=buildTaskLinkOptionsHtml(type);
+    linkKindEl.value='none';
+  }
+  onAddTaskLinkKindChange();
+}
+
+function onAddTaskLinkKindChange(){
+  const type=document.getElementById('addTaskType')?.value||'saida';
+  const kind=document.getElementById('addTaskLinkKind')?.value||'none';
+  const stockWrap=document.getElementById('addTaskStockWrap');
+  const maintenanceWrap=document.getElementById('addTaskMaintenanceWrap');
+  const qtyWrap=document.getElementById('addTaskQtyWrap');
+  const help=document.getElementById('addTaskLinkHelp');
+  if(stockWrap)stockWrap.style.display=(kind==='stock'&&type!=='operacional')?'block':'none';
+  if(qtyWrap)qtyWrap.style.display=(kind==='stock'&&type!=='operacional')?'block':'none';
+  if(maintenanceWrap)maintenanceWrap.style.display=(kind==='maintenance'&&type==='operacional')?'block':'none';
+  if(help){
+    help.textContent=
+      kind==='stock'&&type!=='operacional'
+        ?'Ao vincular item do estoque, o sistema gera automaticamente as etapas relacionadas.'
+        :kind==='maintenance'&&type==='operacional'
+          ?'Ao vincular uma manutenção, a tarefa operacional é criada automaticamente com o equipamento relacionado.'
+          :'A tarefa será criada manualmente no tipo selecionado.';
+  }
+}
+
+function renderChecklistLinkMeta(item){
+  if(!item)return'';
+  if(item.maintenanceId){
+    const maintenance=DB.maintenance.find(m=>Number(m.id)===Number(item.maintenanceId));
+    const eq=DB.equipment.find(e=>Number(e.id)===Number(maintenance?.equipId||item.equipmentId));
+    if(maintenance||eq)return `<div style="font-size:10.5px;color:var(--text3);margin-top:2px;">🔗 Manutenção: ${esc(eq?.name||'Equipamento')} · ${esc(maintenance?.service||'Serviço vinculado')}</div>`;
+  }
+  if(item.equipmentId){
+    const eq=DB.equipment.find(e=>Number(e.id)===Number(item.equipmentId));
+    if(eq)return `<div style="font-size:10.5px;color:var(--text3);margin-top:2px;">🔗 Equipamento: ${esc(eq.name)}</div>`;
+  }
+  if(item.consumableId){
+    const consumable=DB.consumables.find(c=>Number(c.id)===Number(item.consumableId));
+    if(consumable)return `<div style="font-size:10.5px;color:var(--text3);margin-top:2px;">🔗 Consumível: ${esc(consumable.name)}</div>`;
+  }
+  return'';
+}
+
 function addTaskHandler(){
   const desc=(document.getElementById('addTaskDesc')?.value||'').trim();
   const type=(document.getElementById('addTaskType')?.value||'saida').trim();
+  const linkKind=(document.getElementById('addTaskLinkKind')?.value||'none').trim();
+  const stockRef=(document.getElementById('addTaskStock')?.value||'').trim();
+  const maintenanceId=Number(document.getElementById('addTaskMaintenance')?.value||0);
+  const qty=Math.max(1,Number(document.getElementById('addTaskQty')?.value||1));
   const eid=Number(S.selEv||0);
   const allowed=['operacional','saida','montagem','desmontagem','entrega'];
 
-  if(!desc){toast('Informe a descrição da tarefa.','err');return false;}
   if(!allowed.includes(type)){toast('Tipo de tarefa inválido.','err');return false;}
   const bucketKey=type==='operacional'?'__operacional':eid;
   if(type!=='operacional'&&(!eid||!DB.events.find(e=>e.id===eid))){toast('Selecione um evento válido.','err');return false;}
 
-  if(!clists[bucketKey])clists[bucketKey]=[];
-  clists[bucketKey].push({
-    id:nextId(clists[bucketKey]),
-    task:desc,
-    done:false,
-    type,
-    ts:null,
-  });
+  let tasksToCreate=[];
+  if(linkKind==='stock'&&type!=='operacional'){
+    if(!stockRef){toast('Selecione um item do estoque para vincular.','err');return false;}
+    const [source,idRaw]=stockRef.split(':');
+    const stockId=Number(idRaw||0);
+    if(source==='equipment'){
+      const eq=DB.equipment.find(item=>Number(item.id)===stockId);
+      if(!eq){toast('Equipamento não encontrado.','err');return false;}
+
+      const eventRef=DB.events.find(e=>Number(e.id)===eid);
+      if(!eventRef){toast('Evento selecionado não encontrado.','err');return false;}
+
+      const proposal=findProposalForEvent(eventRef);
+      const availForEvent=getAvailableQtyForEvent(eq,eventRef,proposal);
+      if(qty>availForEvent){
+        toast(`Disponibilidade insuficiente para ${eq.name} no período do evento.`, 'err');
+        return false;
+      }
+
+      const currentExtras=Array.isArray(eventRef.extraEquipPlan)?eventRef.extraEquipPlan:[];
+      eventRef.extraEquipPlan=mergeEquipmentPlans([...currentExtras,{eqId:eq.id,qty}]);
+
+      const marker=`[Checklist Equipamento ${eq.id}]`;
+      const noteLine=`${marker} ${qty}x ${eq.name}`;
+      const lines=String(eventRef.notes||'').split('\n').map(line=>line.trim()).filter(Boolean);
+      const existingIdx=lines.findIndex(line=>line.startsWith(marker));
+      if(existingIdx>=0)lines[existingIdx]=noteLine;
+      else lines.push(noteLine);
+      eventRef.notes=lines.join('\n');
+
+      tasksToCreate=buildLinkedEquipmentChecklistTasks(eq,qty);
+    }else if(source==='consumable'){
+      const consumable=DB.consumables.find(item=>Number(item.id)===stockId);
+      if(!consumable){toast('Consumível não encontrado.','err');return false;}
+      tasksToCreate=buildLinkedConsumableChecklistTasks(consumable,qty);
+    }else{
+      toast('Item do estoque inválido.','err');return false;
+    }
+  }else if(linkKind==='maintenance'&&type==='operacional'){
+    const maintenance=DB.maintenance.find(item=>Number(item.id)===maintenanceId&&String(item.status||'pendente')!=='feito');
+    if(!maintenance){toast('Selecione uma manutenção pendente/aprovada.','err');return false;}
+    tasksToCreate=buildMaintenanceChecklistTasks(maintenance);
+  }else{
+    if(!desc){toast('Informe a descrição da tarefa.','err');return false;}
+    tasksToCreate=[{task:desc,type}];
+  }
+
+  pushChecklistItems(bucketKey,tasksToCreate);
 
   saveDB();
   render();
-  toast('Tarefa adicionada! ✅');
+  toast(`${tasksToCreate.length} tarefa(s) adicionada(s)! ✅`);
   return true;
 }
 
@@ -2254,7 +2942,7 @@ function recalcEquipmentMaintenanceState(equipId){
 
 function getReservedQtyForDate(eqId,date){
   if(!date)return 0;
-  return DB.proposals
+  const proposalReserved=DB.proposals
     .filter(p=>p.date===date&&p.status==='aprovado')
     .reduce((acc,p)=>{
       if(Array.isArray(p.equipPlan)&&p.equipPlan.length){
@@ -2264,13 +2952,23 @@ function getReservedQtyForDate(eqId,date){
       if(Array.isArray(p.equipIds)&&p.equipIds.includes(eqId))return acc+1;
       return acc;
     },0);
+
+  const eventReserved=(DB.events||[])
+    .filter(ev=>String(ev.date)===String(date)&&ev.status!=='finalizado')
+    .reduce((acc,ev)=>{
+      const extraPlan=Array.isArray(ev.extraEquipPlan)?ev.extraEquipPlan:[];
+      const found=extraPlan.find(i=>Number(i.eqId)===Number(eqId));
+      return acc+(found?Number(found.qty||0):0);
+    },0);
+
+  return Math.max(0,proposalReserved+eventReserved);
 }
 
 function getReservedQtyForDateRange(eqId,startDate,endDate){
   if(!startDate||!endDate)return 0;
   const s=new Date(startDate).getTime();
   const e=new Date(endDate).getTime();
-  return DB.proposals
+  const proposalReserved=DB.proposals
     .filter(p=>{
       const pStart=new Date(p.date).getTime();
       const pEnd=new Date(p.endDate||p.date).getTime();
@@ -2284,6 +2982,21 @@ function getReservedQtyForDateRange(eqId,startDate,endDate){
       if(Array.isArray(p.equipIds)&&p.equipIds.includes(eqId))return acc+1;
       return acc;
     },0);
+
+  const eventReserved=(DB.events||[])
+    .filter(ev=>{
+      if(ev.status==='finalizado')return false;
+      const evStart=new Date(ev.date).getTime();
+      const evEnd=new Date(ev.endDate||ev.date).getTime();
+      return evStart<=e&&evEnd>=s;
+    })
+    .reduce((acc,ev)=>{
+      const extraPlan=Array.isArray(ev.extraEquipPlan)?ev.extraEquipPlan:[];
+      const found=extraPlan.find(i=>Number(i.eqId)===Number(eqId));
+      return acc+(found?Number(found.qty||0):0);
+    },0);
+
+  return Math.max(0,proposalReserved+eventReserved);
 }
 
 function getAvailableQtyForDate(eq,date){
@@ -2329,7 +3042,21 @@ function getAvailableQtyForEvent(eq,ev,proposal){
     })
     .reduce((acc,p)=>acc+getProposalPlannedQty(p,eq.id),0);
 
-  return Math.max(0,currentAvail-reservedOther);
+  const reservedEventExtras=(DB.events||[])
+    .filter(other=>{
+      if(Number(other.id)===Number(ev.id))return false;
+      if(other.status==='finalizado')return false;
+      const otherStart=new Date(other.date).getTime();
+      const otherEnd=new Date(other.endDate||other.date).getTime();
+      return otherStart<=e&&otherEnd>=s;
+    })
+    .reduce((acc,other)=>{
+      const extraPlan=Array.isArray(other.extraEquipPlan)?other.extraEquipPlan:[];
+      const found=extraPlan.find(item=>Number(item.eqId)===Number(eq.id));
+      return acc+(found?Number(found.qty||0):0);
+    },0);
+
+  return Math.max(0,currentAvail-reservedOther-reservedEventExtras);
 }
 
 function updateProposalAvailabilityPreview(){
@@ -2357,6 +3084,12 @@ function toggleProposalQtyInput(eqId){
   const input=document.getElementById(`proposalQty-${eqId}`);
   if(input)input.disabled=!checked;
   updateProposalAvailabilityPreview();
+}
+
+function toggleProposalConsQtyInput(consumableId){
+  const checked=Boolean(document.getElementById(`proposalCons-${consumableId}`)?.checked);
+  const input=document.getElementById(`proposalConsQty-${consumableId}`);
+  if(input)input.disabled=!checked;
 }
 
 function addEventHandler(){
@@ -2448,9 +3181,11 @@ function editEventHandler(){
   const notes=document.getElementById('editEventNotes')?.value.trim();
   const selectedConsumables=collectEventConsumableSelection('editEvent');
   const selectedExtraEquipment=collectEventEquipmentSelection('editEvent');
+  const extraCostBuild=collectEventExtraCosts('editEvent');
 
   if(!name||!date||!endDate||!client||!venue){toast('Preencha nome, datas, cliente e local.','err');return false;}
   if(val<0){toast('Valor não pode ser negativo.','err');return false;}
+  if(extraCostBuild.error){toast(extraCostBuild.error,'err');return false;}
 
   const previousLoadPlan=getEventLoadPlan(ev.id);
   const previousExtraPlan=Array.isArray(ev.extraEquipPlan)?deepClone(ev.extraEquipPlan):[];
@@ -2492,8 +3227,15 @@ function editEventHandler(){
   ensureChecklistForEvent(ev,findProposalForEvent(ev)||{});
   syncEventFinalizationFromChecklist(ev.id);
 
+  const tempCreated=generateTempRentalPayable(ev);
+  const consCreated=generateConsumablePayable(ev);
+  replaceEventExtraCosts(ev.id,extraCostBuild.costs);
+  const extras=[consCreated>0?'consumíveis':null,tempCreated>0?'terceiros':null].filter(Boolean);
+  const customMsg=extraCostBuild.costs.length>0?' + custos extras atualizados':'';
+  const extrasMsg=extras.length>0?` + despesa de ${extras.join(' e ')} lançada`:customMsg;
+
   saveDB();
-  toast('Evento atualizado com equipamentos extras, consumíveis e checklist revisados. ✏️');
+  toast(`Evento atualizado com equipamentos extras, consumíveis e checklist revisados${extrasMsg||customMsg}. ✏️`);
   render();
   return true;
 }
@@ -2602,12 +3344,29 @@ function createProposal(){
   const time=document.getElementById('proposalTime')?.value||'19:00';
   const val=Number(document.getElementById('proposalValue')?.value||0);
   const checks=Array.from(document.querySelectorAll('#proposalEquipList input[data-eq-check="1"]:checked'));
+  const consumableChecks=Array.from(document.querySelectorAll('#proposalEquipList input[data-cons-check="1"]:checked'));
   const equipIds=checks.map(c=>Number(c.value));
   const equipPlan=equipIds.map(eqId=>({
     eqId,
     qty:Math.max(1,Number(document.getElementById(`proposalQty-${eqId}`)?.value||1)),
   }));
-  const items=equipIds.map(id=>DB.equipment.find(e=>e.id===id)?.name).filter(Boolean);
+  const consumablePlan=consumableChecks
+    .map(c=>{
+      const consumableId=Number(c.value);
+      const meta=DB.consumables.find(item=>Number(item.id)===consumableId);
+      if(!meta)return null;
+      return {
+        consumableId,
+        name:meta.name,
+        unit:meta.unit||'unidade',
+        qty:Math.max(1,Number(document.getElementById(`proposalConsQty-${consumableId}`)?.value||1)),
+      };
+    })
+    .filter(Boolean);
+  const items=[
+    ...equipIds.map(id=>DB.equipment.find(e=>e.id===id)?.name).filter(Boolean),
+    ...consumablePlan.map(item=>`${item.qty}x ${item.name}`),
+  ];
   const selectedCategories=Array.from(document.querySelectorAll('[name="proposalService"]:checked')).map(el=>el.value);
   const catMap={
     'audio':'Som',
@@ -2630,7 +3389,7 @@ function createProposal(){
   const serviceCategories=[...new Set([...(selectedCategories||[]),...inferredCategories])];
 
   if(!client||!event||!date||!endDate||val<=0){toast('Preencha cliente, evento, datas e valor.','err');return false;}
-  if(equipIds.length===0){toast('Selecione ao menos um equipamento.','err');return false;}
+  if(equipIds.length===0&&consumablePlan.length===0){toast('Selecione ao menos um item (permanente ou consumível).','err');return false;}
 
   DB.proposals.push({
     id:nextId(DB.proposals),
@@ -2645,6 +3404,7 @@ function createProposal(){
     serviceCategories,
     equipIds,
     equipPlan,
+    consumablePlan,
     empresa_id:Number(S.companyId||1),
   });
 
@@ -2801,6 +3561,16 @@ function ensureEventForProposal(p){
     for(let n=0;n<qty;n++)expanded.push(Number(i.eqId));
   });
 
+  const proposalConsPlan=Array.isArray(p.consumablePlan)?p.consumablePlan:[];
+  const eventConsumables=proposalConsPlan.map(item=>{
+    const meta=DB.consumables.find(c=>Number(c.id)===Number(item.consumableId));
+    const unitCost=Math.max(0,Number(meta?.unitCost||0));
+    const qty=Math.max(1,Number(item.qty||1));
+    return {consumableId:Number(item.consumableId),name:item.name||meta?.name||`Consumível #${item.consumableId}`,unit:item.unit||meta?.unit||'unidade',qty,unitCost,checklistProfile:meta?getConsumableChecklistProfile(meta):'consumivel',totalCost:qty*unitCost};
+  }).filter(item=>item.consumableId);
+  const consumablesTotalCost=eventConsumables.reduce((a,b)=>a+b.totalCost,0);
+  if(eventConsumables.length)applyEventConsumableStockDelta([],eventConsumables);
+
   ev={
     id:nextId(DB.events),
     name:p.event,
@@ -2815,6 +3585,8 @@ function ensureEventForProposal(p){
     cat:'Corporativo',
     equip:expanded,
     extraEquipPlan:[],
+    consumables:eventConsumables,
+    consumablesTotalCost,
     notes:'Gerado automaticamente via orçamento aprovado',
     proposalId:p.id,
   };
@@ -2833,10 +3605,18 @@ function ensureChecklistForEvent(ev,p){
     const eq=DB.equipment.find(e=>e.id===Number(item.eqId));
     const name=eq?eq.name:`Equipamento ${item.eqId}`;
     const qty=Math.max(1,Number(item.qty||1));
-    desired.push({task:`Separar ${qty}x ${name} para carga`,type:'saida'});
-    desired.push({task:`Montar ${qty}x ${name} no local`,type:'montagem'});
-    desired.push({task:`Desmontar ${qty}x ${name} após evento`,type:'desmontagem'});
-    desired.push({task:`Entregar/conferir ${qty}x ${name}`,type:'entrega'});
+    const isTemp=eq&&eq.temporary;
+    if(isTemp){
+      desired.push({task:`Solicitar/confirmar aluguel de ${qty}x ${name} com fornecedor`,type:'saida'});
+      desired.push({task:`Receber e montar ${qty}x ${name} no local`,type:'montagem'});
+      desired.push({task:`Desmontar ${qty}x ${name} após evento`,type:'desmontagem'});
+      desired.push({task:`Devolver ${qty}x ${name} ao fornecedor`,type:'entrega'});
+    }else{
+      desired.push({task:`Separar ${qty}x ${name} para carga`,type:'saida'});
+      desired.push({task:`Montar ${qty}x ${name} no local`,type:'montagem'});
+      desired.push({task:`Desmontar ${qty}x ${name} após evento`,type:'desmontagem'});
+      desired.push({task:`Entregar/conferir ${qty}x ${name}`,type:'entrega'});
+    }
   });
 
   if(!desired.length&&Array.isArray(proposal.items)&&proposal.items.length){
@@ -2898,7 +3678,11 @@ function updateProposalStatus(pid,newStatus){
   if(newStatus==='aprovado'&&prev!=='aprovado'){
     const ev=ensureEventForProposal(p);
     ensureChecklistForEvent(ev,p);
-    toast('Orçamento aprovado! Evento adicionado à agenda. ✅');
+    const consPayCreated=generateConsumablePayable(ev);
+    const tempPayCreated=generateTempRentalPayable(ev);
+    const extras=[consPayCreated>0?'consumíveis':null,tempPayCreated>0?'terceiros':null].filter(Boolean);
+    const consMsg=extras.length>0?` + despesa de ${extras.join(' e ')} lançada no financeiro`:'';
+    toast(`Orçamento aprovado! Evento adicionado à agenda${consMsg}. ✅`);
     saveDB();
 
     const goContract=window.confirm('Orçamento aprovado. Gerar contrato agora?');
@@ -3370,7 +4154,7 @@ function deleteEquip(equipId){
 const NAVS=[
   {s:'Principal',items:[
     {id:'dashboard',ic:'◈',lb:'Dashboard'},
-    {id:'agenda',ic:'◷',lb:'Agenda',badge:'4',bc:'b-green'},
+    {id:'agenda',ic:'◷',lb:'Agenda'},
     {id:'clientes',ic:'◉',lb:'Clientes'},
   ]},
   {s:'Operacional',items:[
@@ -3380,16 +4164,14 @@ const NAVS=[
   ]},
   {s:'Comercial',items:[
     {id:'financeiro',ic:'◎',lb:'Financeiro'},
+    {id:'resultados_evento',ic:'◍',lb:'Resultados',ownerOnly:true},
     {id:'orcamentos',ic:'◌',lb:'Orçamentos'},
     {id:'contratos',ic:'◈',lb:'Contratos'},
   ]},
   {s:'Gestão',items:[
-    {id:'equipe',ic:'◍',lb:'Equipe'},
     {id:'objetivos_compras',ic:'◎',lb:'Objetivos e Compras'},
-    {id:'categorias_estoque',ic:'◈',lb:'Categorias de Estoque'},
     {id:'nps',ic:'◐',lb:'NPS & Avaliações'},
     {id:'notifs',ic:'◔',lb:'Notificações',badge:'3',bc:'nb-red'},
-    {id:'configuracoes',ic:'⚙',lb:'Configurações'},
   ]},
 ];
 
@@ -3399,6 +4181,7 @@ function renderSidebar(){
   NAVS.forEach(sec=>{
     nav+=`<div class="nav-sec"><div class="nav-sec-label">${sec.s}</div>`;
     sec.items.forEach(it=>{
+      if(it.ownerOnly&&!isCompanyOwner())return;
       const badgeValue=it.id==='notifs'?String(notifCount||''):it.badge;
       const badgeClass=it.id==='notifs'?(notifCount?'nb-red':''):(it.bc||'');
       const bdg=badgeValue?`<span class="nav-badge ${badgeClass}">${badgeValue}</span>`:'';
@@ -3407,12 +4190,20 @@ function renderSidebar(){
     nav+='</div>';
   });
   return`<div id="sidebar">
-  <div class="sb-logo"><div class="logo-icon">EP</div><div class="logo-name">EventPro</div><div class="logo-pro">PRO</div></div>
+  <div class="sb-logo" onclick="toggleSidebar()" title="${S.sidebarCollapsed?'Expandir':'Recolher'} barra lateral"><div class="logo-icon">EP</div><div class="logo-name">EventPro</div><div class="logo-pro">${S.sidebarCollapsed?'▸':'◂'}</div></div>
   <nav class="sb-nav">${nav}</nav>
   <div class="sb-footer"><div class="user-row">
     <div class="avatar">${DB.user.initials}</div>
     <div style="flex:1;min-width:0;"><div class="user-name">${DB.user.name}</div><div class="user-role">${DB.user.role}</div></div>
-    <span style="font-size:15px;cursor:pointer;color:var(--text3);" onclick="logout()">↩</span>
+    <div class="user-actions" onclick="event.stopPropagation();">
+      <button class="user-menu-btn" onclick="toggleUserMenu(event)" title="Mais opções">⋯</button>
+      ${S.userMenuOpen?`<div class="user-menu">
+        <button class="user-menu-item" onclick="userMenuAction('equipe')">👥 Equipe</button>
+        <button class="user-menu-item" onclick="userMenuAction('categorias_estoque')">🗂 Categorias de estoque</button>
+        <button class="user-menu-item" onclick="userMenuAction('configuracoes')">⚙ Configurações</button>
+        <button class="user-menu-item danger" onclick="userMenuAction('logout')">↩ Finalizar sessão</button>
+      </div>`:''}
+    </div>
   </div></div></div>`;
 }
 function logout(){
@@ -3428,7 +4219,7 @@ function logout(){
 // ═══════════════════════════════════════════════════════════
 // TOPBAR
 // ═══════════════════════════════════════════════════════════
-const TITLES={dashboard:'Dashboard',agenda:'Agenda de Eventos',estoque:'Gestão de Estoque',manutencao:'Manutenção Operacional',checklist:'Checklist',financeiro:'Financeiro',orcamentos:'Orçamentos Comerciais',contratos:'Contratos',clientes:'Clientes & CRM',equipe:'Equipe',objetivos_compras:'Objetivos e Compras',categorias_estoque:'Categorias de Estoque',nps:'NPS & Avaliações',notifs:'Notificações',configuracoes:'Configurações da Empresa'};
+const TITLES={dashboard:'Dashboard',agenda:'Agenda de Eventos',estoque:'Gestão de Estoque',manutencao:'Manutenção Operacional',checklist:'Checklist',financeiro:'Financeiro',resultados_evento:'Resultados por Evento',orcamentos:'Orçamentos Comerciais',contratos:'Contratos',clientes:'Clientes & CRM',equipe:'Equipe',objetivos_compras:'Objetivos e Compras',categorias_estoque:'Categorias de Estoque',nps:'NPS & Avaliações',notifs:'Notificações',configuracoes:'Configurações da Empresa'};
 function renderTopbar(){
   const notifCount=getNotifications().length;
   let actions='';
@@ -3572,7 +4363,8 @@ function collectEventConsumableSelection(prefix){
 
 function renderEventEquipmentSelector(prefix,ev,selectedPlan){
   const selectedMap=new Map((Array.isArray(selectedPlan)?selectedPlan:[]).map(item=>[Number(item.eqId),Math.max(1,Number(item.qty||1))]));
-  if(!DB.equipment.length)return '<div style="font-size:11.5px;color:var(--text2);">Nenhum equipamento cadastrado.</div>';
+  const permanentEquip=DB.equipment.filter(e=>!e.temporary);
+  if(!permanentEquip.length)return '<div style="font-size:11.5px;color:var(--text2);">Nenhum equipamento permanente cadastrado.</div>';
 
   const proposal=findProposalForEvent(ev);
   const basePlan=getEventBaseLoadPlan(ev,proposal);
@@ -3582,7 +4374,7 @@ function renderEventEquipmentSelector(prefix,ev,selectedPlan){
     return acc;
   },{});
 
-  return DB.equipment.map(eq=>{
+  return permanentEquip.map(eq=>{
     const checked=selectedMap.has(Number(eq.id));
     const qty=selectedMap.get(Number(eq.id))||1;
     const baseQty=Math.max(0,Number(baseMap[eq.id]||0));
@@ -3597,11 +4389,36 @@ function renderEventEquipmentSelector(prefix,ev,selectedPlan){
   }).join('');
 }
 
+function renderEventTempEquipSelector(prefix,ev,selectedPlan){
+  const selectedMap=new Map((Array.isArray(selectedPlan)?selectedPlan:[]).map(item=>[Number(item.eqId),Math.max(1,Number(item.qty||1))]));
+  const tempEquip=DB.equipment.filter(e=>e.temporary);
+  if(!tempEquip.length)return '<div style="font-size:11.5px;color:var(--text2);">Nenhum equipamento de terceiros cadastrado. Adicione pelo estoque marcando como Terceiros.</div>';
+  return tempEquip.map(eq=>{
+    const checked=selectedMap.has(Number(eq.id));
+    const qty=selectedMap.get(Number(eq.id))||1;
+    const rentalCost=Math.max(0,Number(eq.rentalCost||0));
+    const meta=formatEquipmentIdentity(eq);
+    const category=normalizeEquipmentCategory(eq.cat,eq.name);
+    const searchTerms=`${eq.name} ${eq.brand||''} ${category} terceiros`;
+    return `<label data-event-item="${prefix}-TempEq" data-filter="${esc(searchTerms)}" style="display:flex;align-items:center;gap:8px;font-size:12px;"><input id="${prefix}TempEq-${eq.id}" data-event-eq="${prefix}" type="checkbox" value="${eq.id}" ${checked?'checked':''} onchange="toggleEventTempEquipQtyInput('${prefix}',${eq.id})"><span style="flex:1;"><strong>${esc(eq.name)}</strong><span style="color:var(--text3)"> (${meta.label})</span><div style="display:flex;align-items:center;gap:6px;margin-top:4px;"><span class="badge b-purple" style="font-size:9.5px;">Terceiro</span><span class="badge b-gray" style="font-size:9.5px;">${esc(category)}</span><span style="font-size:10.5px;color:var(--red);font-weight:600;">${fmtVal(rentalCost)}/evento</span></div></span><input id="${prefix}TempEqQty-${eq.id}" type="number" min="1" step="1" value="${qty}" class="fc" style="max-width:84px;" ${checked?'':'disabled'}></label>`;
+  }).join('');
+}
+
+function toggleEventTempEquipQtyInput(prefix,eqId){
+  const checked=Boolean(document.getElementById(`${prefix}TempEq-${eqId}`)?.checked);
+  const input=document.getElementById(`${prefix}TempEqQty-${eqId}`);
+  if(input)input.disabled=!checked;
+}
+
 function collectEventEquipmentSelection(prefix){
   return Array.from(document.querySelectorAll(`input[data-event-eq="${prefix}"]:checked`))
     .map(el=>{
       const eqId=Number(el.value);
-      const qty=Math.max(1,Number(document.getElementById(`${prefix}EqQty-${eqId}`)?.value||1));
+      const qty=Math.max(1,Number(
+        document.getElementById(`${prefix}EqQty-${eqId}`)?.value||
+        document.getElementById(`${prefix}TempEqQty-${eqId}`)?.value||
+        1
+      ));
       return {eqId,qty};
     });
 }
@@ -3685,6 +4502,8 @@ function getNotifications(){
   const notifications=[];
   const tenantEvents=getTenantEvents().slice().sort((a,b)=>startTsOfEvent(a)-startTsOfEvent(b));
   const todayISO=isoToday();
+  const npsRows=Array.isArray(DB.nps)?DB.nps:[];
+  const normalizeText=v=>String(v||'').trim().toLowerCase();
 
   tenantEvents.forEach(ev=>{
     const tasks=clists[ev.id]||[];
@@ -3710,6 +4529,32 @@ function getNotifications(){
       tm:fmtRelativeDayLabel(ev.date),
     });
   });
+
+  tenantEvents
+    .filter(ev=>{
+      const endDate=String(ev.endDate||ev.date||'');
+      if(!endDate)return false;
+      if(String(ev.status||'').toLowerCase()==='proposta')return false;
+      const dueReminder=shiftISODate(endDate,2);
+      if(String(dueReminder)>todayISO)return false;
+
+      const hasEvaluation=npsRows.some(n=>
+        Number(n?.eventId||0)===Number(ev.id)||
+        normalizeText(n?.event)===normalizeText(ev.name)
+      );
+      return !hasEvaluation;
+    })
+    .slice(0,3)
+    .forEach(ev=>{
+      const dueReminder=shiftISODate(String(ev.endDate||ev.date),2);
+      notifications.push({
+        ic:'⭐',
+        t:'Lembrete de colher avaliação',
+        s:`${ev.name} · solicitar NPS do cliente`,
+        c:'b-amber',
+        tm:fmtRelativeDayLabel(dueReminder),
+      });
+    });
 
   (DB.finance?.pay||[])
     .filter(entry=>entry.status==='a_pagar'&&entry.due)
@@ -3850,6 +4695,13 @@ function pgDashboard(){
   const pending=m.pendingTasks.slice(0,4);
 
   return`
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
+    <div>
+      <div style="font-family:var(--fh);font-size:20px;font-weight:800;">Visão Geral</div>
+      <div style="font-size:12px;color:var(--text2);">Acompanhe os próximos eventos e acesse ações rápidas.</div>
+    </div>
+    <button class="btn btn-primary" onclick="openM('addEvent')">+ Criar evento</button>
+  </div>
   <div class="grid g4" style="margin-bottom:14px;">
     <div class="stat"><div class="stat-top"><div class="stat-ico" style="background:var(--glow)">📅</div><span class="stat-chg up">+12%</span></div><div class="stat-val">${m.activeEventsCount}</div><div class="stat-lbl">Eventos Ativos</div></div>
     <div class="stat"><div class="stat-top"><div class="stat-ico" style="background:var(--gbg)">💰</div><span class="stat-chg up">+8%</span></div><div class="stat-val">R$ ${(m.tRec/1000).toFixed(1)}k</div><div class="stat-lbl">A Receber</div></div>
@@ -3903,7 +4755,7 @@ function pgChecklist(){
   if(checklistType==='operacional'){
     const operational=(clists.__operacional||[])
       .filter(t=>t.type==='operacional')
-      .map(t=>({id:t.id,task:t.task,type:t.type,ts:t.ts,done:Boolean(t.done)}));
+      .map(t=>({id:t.id,task:t.task,type:t.type,ts:t.ts,done:Boolean(t.done),equipmentId:t.equipmentId||null,consumableId:t.consumableId||null,maintenanceId:t.maintenanceId||null,linkedKind:t.linkedKind||null}));
     
     return`
     <div class="card" style="margin-bottom:14px;">
@@ -3923,7 +4775,7 @@ function pgChecklist(){
       <div class="card-body" style="padding-top:6px;">
         ${operational.length===0?'<div class="empty"><div class="empty-ico">✅</div><div>Nenhuma tarefa operacional cadastrada</div></div>':
         operational.map(c=>{
-          return`<div class="ci" onclick="toggleTask('__operacional',${c.id})"><div class="cb${c.done?' on':''}">${c.done?'<span style="color:#fff;font-size:9px;font-weight:800;">✓</span>':''}</div><div style="flex:1;"><div style="font-size:12.5px;${c.done?'text-decoration:line-through;color:var(--text3);':''}">${c.task}</div></div></div>`;
+          return`<div class="ci" onclick="toggleTask('__operacional',${c.id})"><div class="cb${c.done?' on':''}">${c.done?'<span style="color:#fff;font-size:9px;font-weight:800;">✓</span>':''}</div><div style="flex:1;"><div style="font-size:12.5px;${c.done?'text-decoration:line-through;color:var(--text3);':''}">${c.task}</div>${renderChecklistLinkMeta(c)}</div></div>`;
         }).join('')}
       </div>
     </div>`;
@@ -3999,6 +4851,7 @@ function pgChecklist(){
         <div class="cb${c.done?' on':''}">${c.done?'<span style="color:#fff;font-size:9px;font-weight:800;">✓</span>':''}</div>
         <div style="flex:1;">
           <div style="font-size:12.5px;${c.done?'text-decoration:line-through;color:var(--text3);':''}">${c.task}</div>
+          ${renderChecklistLinkMeta(c)}
           ${c.ts?`<div style="font-size:10.5px;color:var(--text3);margin-top:1px;">✓ ${c.ts}</div>`:''}
         </div>
       </div>`).join('')}
@@ -4123,7 +4976,7 @@ function pgAgenda(){
   }).join('');
 
   const dayListHtml=selectedDayEvents.length
-    ?selectedDayEvents.map(e=>`<div class="agenda-day-card" onclick="openEventDetail(${e.id})"><div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:8px;"><div style="font-family:var(--fh);font-size:14px;font-weight:600;flex:1;min-width:0;">${e.name}</div><span class="badge ${sc[e.status]||'b-gray'}">${e.status||'sem status'}</span></div><div style="font-size:12px;color:var(--text2);margin-bottom:6px;">🕐 ${e.time||'00:00'} · 👤 ${e.client||'-'}</div><div style="font-size:12px;color:var(--text2);margin-bottom:10px;">📍 ${e.venue||'-'}</div><div style="display:flex;justify-content:space-between;align-items:center;"><span style="font-family:var(--fh);font-weight:700;font-size:14px;color:var(--green);">${fmtVal(Number(e.value||0))}</span><div style="display:flex;gap:6px;"><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openEditEvent(${e.id})">✏️</button><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();deleteEvent(${e.id})">🗑</button><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openEventDetail(${e.id})">Detalhes</button></div></div></div>`).join('')
+    ?selectedDayEvents.map(e=>`<div class="agenda-day-card" onclick="openEventDetail(${e.id})"><div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:8px;"><div style="font-family:var(--fh);font-size:14px;font-weight:600;flex:1;min-width:0;">${e.name}</div><span class="badge ${sc[e.status]||'b-gray'}">${e.status||'sem status'}</span></div><div style="font-size:12px;color:var(--text2);margin-bottom:6px;">🕐 ${e.time||'00:00'} · 👤 ${e.client||'-'}</div><div style="font-size:12px;color:var(--text2);margin-bottom:10px;">📍 ${e.venue||'-'}</div>${renderEventNotesPreview(e)}<div style="display:flex;justify-content:space-between;align-items:center;"><span style="font-family:var(--fh);font-weight:700;font-size:14px;color:var(--green);">${fmtVal(Number(e.value||0))}</span><div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;">${isCompanyOwner()?`<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openEventProfitability(${e.id})">📈</button>`:''}<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openEditEvent(${e.id})">✏️</button><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();deleteEvent(${e.id})">🗑</button><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openEventDetail(${e.id})">Detalhes</button></div></div></div>`).join('')
     :`<div class="empty"><div class="empty-ico">📅</div><div>Nenhum evento para ${fmtDateBR(selectedDay)}</div></div>`;
 
   if(S.tabs.agenda==='cal'){
@@ -4145,7 +4998,7 @@ function pgAgenda(){
     return `${filterControl}<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap;margin-bottom:14px;"><div class="card" style="flex:0 0 280px;min-width:240px;"><div class="card-header" style="padding:10px 12px;"><button class="btn btn-ghost btn-sm" onclick="if(S.calM===0){S.calM=11;S.calY-=1;}else{S.calM-=1;}render()">◄</button><span class="card-title" style="text-align:center;font-size:13px;">${mns[S.calM]} ${S.calY}</span><button class="btn btn-ghost btn-sm" onclick="if(S.calM===11){S.calM=0;S.calY+=1;}else{S.calM+=1;}render()">►</button></div><div class="card-body" style="padding:8px 10px;">${cg}</div></div><div class="card" style="flex:1;min-width:240px;"><div class="card-header"><span class="card-title">📅 ${fmtDateBR(selectedDay)}</span></div><div class="card-body" style="padding-top:8px;"><div class="day-nav"><button class="btn btn-ghost btn-sm" onclick="agendaMoveDay(-1)">◄</button><div class="day-strip">${dayStrip}</div><button class="btn btn-ghost btn-sm" onclick="agendaMoveDay(1)">►</button></div><div style="display:grid;gap:10px;max-height:420px;overflow-y:auto;">${dayListHtml}</div></div></div></div><div class="card"><div class="card-header"><span class="card-title">Eventos do Mês</span></div><div class="tw"><table><tr><th>Evento</th><th>Cliente</th><th>Data</th><th>Local</th><th>Status</th><th>Valor</th></tr>${monthEvents.map(e=>`<tr onclick="openEventDetail(${e.id})" style="cursor:pointer;"><td><div style="font-weight:500">${e.name}</div></td><td style="color:var(--text2)">${e.client}</td><td>${e.date} ${e.time}${e.endDate&&e.endDate!==e.date?`<br>${e.endDate} ${e.endTime||''}`:''}</td><td>${e.venue}</td><td><span class="badge ${sc[e.status]||'b-gray'}">${e.status}</span></td><td style="font-weight:600;color:var(--green);">${fmtVal(Number(e.value||0))}</td></tr>`).join('')}</table></div></div>`;
   }
 
-  return `${filterControl}<div style="display:flex;flex-wrap:wrap;gap:12px;">${filteredTenantEvents.map(e=>`<div class="ev-card" onclick="openEventDetail(${e.id})"><div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:8px;"><span class="badge ${cc[e.cat]||'b-blue'}">${e.cat}</span><span class="badge ${sc[e.status]||'b-gray'}">${e.status}</span></div><div style="font-family:var(--fh);font-size:14px;font-weight:600;margin-bottom:3px;">${e.name}</div><div style="font-size:11.5px;color:var(--text2);margin-bottom:10px;">${e.client}</div><div style="height:1px;background:var(--border);margin-bottom:8px;"></div><div style="display:flex;gap:10px;font-size:11.5px;color:var(--text2);margin-bottom:3px;"><span>📅 ${e.date}${e.endDate&&e.endDate!==e.date?` a ${e.endDate}`:''}</span><span>🕐 ${e.time}${e.endTime?`-${e.endTime}`:''}</span></div><div style="font-size:11.5px;color:var(--text2);margin-bottom:10px;">📍 ${e.venue}</div><div style="display:flex;align-items:center;justify-content:space-between;"><span style="font-family:var(--fh);font-weight:700;font-size:15px;color:var(--green);">${fmtVal(Number(e.value||0))}</span><div style="display:flex;gap:4px;"><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();S.selEv=${e.id};nav('checklist')">✅</button><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openEditEvent(${e.id})">✏️</button><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();deleteEvent(${e.id})">🗑</button></div></div></div>`).join('')||`<div class="empty" style="width:100%;"><div class="empty-ico">📅</div><div>Nenhum evento no filtro selecionado.</div></div>`}</div>`;
+  return `${filterControl}<div style="display:flex;flex-wrap:wrap;gap:12px;">${filteredTenantEvents.map(e=>`<div class="ev-card" onclick="openEventDetail(${e.id})"><div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:8px;"><span class="badge ${cc[e.cat]||'b-blue'}">${e.cat}</span><span class="badge ${sc[e.status]||'b-gray'}">${e.status}</span></div><div style="font-family:var(--fh);font-size:14px;font-weight:600;margin-bottom:3px;">${e.name}</div><div style="font-size:11.5px;color:var(--text2);margin-bottom:10px;">${e.client}</div><div style="height:1px;background:var(--border);margin-bottom:8px;"></div><div style="display:flex;gap:10px;font-size:11.5px;color:var(--text2);margin-bottom:3px;"><span>📅 ${e.date}${e.endDate&&e.endDate!==e.date?` a ${e.endDate}`:''}</span><span>🕐 ${e.time}${e.endTime?`-${e.endTime}`:''}</span></div><div style="font-size:11.5px;color:var(--text2);margin-bottom:10px;">📍 ${e.venue}</div>${renderEventNotesPreview(e,96)}<div style="display:flex;align-items:center;justify-content:space-between;"><span style="font-family:var(--fh);font-weight:700;font-size:15px;color:var(--green);">${fmtVal(Number(e.value||0))}</span><div style="display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end;"><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();S.selEv=${e.id};nav('checklist')">✅</button>${isCompanyOwner()?`<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openEventProfitability(${e.id})">📈</button>`:''}<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openEditEvent(${e.id})">✏️</button><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();deleteEvent(${e.id})">🗑</button></div></div></div>`).join('')||`<div class="empty" style="width:100%;"><div class="empty-ico">📅</div><div>Nenhum evento no filtro selecionado.</div></div>`}</div>`;
 }
 
 // ESTOQUE
@@ -4520,6 +5373,59 @@ function pgFinanceiro(){
   </table></div></div>`;
 }
 
+function pgResultadosEvento(){
+  if(!isCompanyOwner())return '<div class="card"><div class="card-body" style="padding:24px;"><div class="empty"><div class="empty-ico">🔒</div><div>Somente o dono da empresa pode visualizar resultados por evento.</div></div></div></div>';
+
+  const selectedEventId=Number(S.resultEventId||0);
+  const allRows=getEventProfitabilityRows();
+  const rows=selectedEventId?allRows.filter(row=>Number(row.event.id)===selectedEventId):allRows;
+  const selectedEvent=selectedEventId?(DB.events||[]).find(ev=>Number(ev.id)===selectedEventId):null;
+  const selectedRow=selectedEventId?allRows.find(row=>Number(row.event.id)===selectedEventId):null;
+  const selectedCostRows=selectedEvent?getEventCostDetailRows(selectedEvent):[];
+  const selectedCostsTotal=selectedCostRows.reduce((acc,row)=>acc+Number(row.amount||0),0);
+  const totalRevenue=rows.reduce((acc,row)=>acc+row.plannedRevenue,0);
+  const totalCosts=rows.reduce((acc,row)=>acc+row.totalPlannedCost,0);
+  const totalProfit=rows.reduce((acc,row)=>acc+row.projectedProfit,0);
+  const profitable=rows.filter(row=>row.projectedProfit>=0).length;
+
+  return `
+  ${selectedEvent?`<div class="card" style="margin-bottom:14px;"><div class="card-header" style="gap:10px;flex-wrap:wrap;"><div style="flex:1;min-width:220px;"><div class="card-title">${esc(selectedEvent.name)}</div><div style="font-size:11.5px;color:var(--text2);margin-top:4px;">${fmtDateBR(selectedEvent.date)} · ${esc(selectedEvent.client||'-')} · ${esc(selectedEvent.venue||'-')}</div></div><div style="display:flex;gap:8px;flex-wrap:wrap;"><button class="btn btn-ghost btn-sm" onclick="openEditEvent(${selectedEvent.id})">Editar evento</button><button class="btn btn-ghost btn-sm" onclick="clearEventProfitabilityFilter()">Fechar detalhes</button></div></div><div class="card-body" style="padding-top:10px;display:grid;gap:14px;">
+    <div class="grid g4">
+      <div class="stat"><div class="stat-val" style="color:var(--green);">${fmtVal(selectedRow?.plannedRevenue||0)}</div><div class="stat-lbl">Receita</div></div>
+      <div class="stat"><div class="stat-val" style="color:var(--red);">${fmtVal(selectedRow?.totalPlannedCost||0)}</div><div class="stat-lbl">Custos</div></div>
+      <div class="stat"><div class="stat-val" style="color:${Number(selectedRow?.projectedProfit||0)>=0?'var(--green)':'var(--red)'};">${fmtVal(selectedRow?.projectedProfit||0)}</div><div class="stat-lbl">Lucro</div></div>
+      <div class="stat"><div class="stat-val">${fmtVal(selectedCostsTotal)}</div><div class="stat-lbl">Lista de Custos</div></div>
+    </div>
+    <div class="grid g2" style="align-items:start;gap:14px;">
+      <div class="card" style="margin:0;"><div class="card-header"><span class="card-title">Todos os Custos do Evento</span><span style="font-size:11px;color:var(--text2);">Inclui vinculados no financeiro e consumíveis planejados</span></div><div class="card-body" style="padding-top:8px;display:grid;gap:8px;max-height:420px;overflow:auto;">
+        ${selectedCostRows.length?selectedCostRows.map(cost=>`<div style="border:1px solid var(--border);border-radius:10px;padding:10px;display:flex;align-items:flex-start;justify-content:space-between;gap:10px;"><div style="min-width:0;flex:1;"><div style="font-weight:600;">${esc(cost.label)}</div><div style="font-size:11px;color:var(--text2);margin-top:4px;display:flex;gap:6px;flex-wrap:wrap;"><span class="badge b-gray">${esc(cost.typeLabel)}</span><span>${cost.due?fmtDateBR(cost.due):'Sem vencimento'}</span></div></div><div style="text-align:right;flex-shrink:0;"><div style="font-weight:700;color:var(--red);">${fmtVal(cost.amount)}</div><div style="margin-top:4px;"><span class="badge ${cost.badge}">${esc(cost.status)}</span></div></div></div>`).join(''):'<div class="empty" style="padding:18px 12px;"><div class="empty-ico">💸</div><div>Nenhum custo registrado para este evento.</div></div>'}
+      </div></div>
+      <div class="card" style="margin:0;"><div class="card-header"><span class="card-title">Editar Custos Extras</span><span style="font-size:11px;color:var(--text2);">Funcionários, combustível, alimentação, pedágio...</span></div><div class="card-body" style="padding-top:8px;display:grid;gap:10px;">${renderEventExtraCostEditor('resultEvent',selectedEvent)}<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;"><button type="button" class="btn btn-ghost btn-sm" onclick="addEventExtraCostRow('resultEvent')">+ Adicionar custo</button><button class="btn btn-primary btn-sm" onclick="saveResultEventCosts()">Salvar custos</button></div></div></div>
+    </div>
+  </div></div>`:''}
+  <div class="grid g4" style="margin-bottom:14px;">
+    <div class="stat"><div class="stat-top"><div class="stat-ico" style="background:var(--gbg)">💚</div></div><div class="stat-val" style="color:var(--green)">${fmtVal(totalRevenue)}</div><div class="stat-lbl">Receita Projetada</div></div>
+    <div class="stat"><div class="stat-top"><div class="stat-ico" style="background:var(--rbg)">💸</div></div><div class="stat-val" style="color:var(--red)">${fmtVal(totalCosts)}</div><div class="stat-lbl">Custos Projetados</div></div>
+    <div class="stat"><div class="stat-top"><div class="stat-ico" style="background:${totalProfit>=0?'var(--glow)':'var(--rbg)'}">📈</div></div><div class="stat-val" style="color:${totalProfit>=0?'var(--green)':'var(--red)'}">${fmtVal(totalProfit)}</div><div class="stat-lbl">Lucro Projetado</div></div>
+    <div class="stat"><div class="stat-top"><div class="stat-ico" style="background:var(--abg)">🎯</div></div><div class="stat-val">${profitable}/${rows.length}</div><div class="stat-lbl">Eventos Positivos</div></div>
+  </div>
+  <div class="card"><div class="card-header"><span class="card-title">Resultado por Evento</span><span style="font-size:11.5px;color:var(--text2);">Visão restrita ao admin da empresa</span></div>
+  <div class="tw"><table><tr><th>Evento</th><th>Receita</th><th>Custos</th><th>Lucro</th><th>Margem</th><th>Status</th></tr>
+  ${rows.map(row=>{
+    const profitClass=row.projectedProfit>=0?'b-green':'b-red';
+    const marginLabel=row.marginPct===null?'—':`${row.marginPct.toFixed(1)}%`;
+    return `<tr onclick="openResultEventCosts(${row.event.id})" style="cursor:pointer;">
+      <td><div style="font-weight:600;display:flex;align-items:center;gap:8px;">${esc(row.event.name||'Evento')}${selectedEventId===Number(row.event.id)?'<span class="badge b-blue">selecionado</span>':''}</div><div style="font-size:11px;color:var(--text2);">${fmtDateBR(row.event.date)} · ${esc(row.event.client||'-')} · ${esc(row.event.venue||'-')}</div><div style="font-size:10.5px;color:var(--text3);margin-top:4px;">Clique para ver e editar custos</div></td>
+      <td><div style="font-weight:600;color:var(--green);">${fmtVal(row.plannedRevenue)}</div><div style="font-size:11px;color:var(--text2);">Recebido: ${fmtVal(row.receivedRevenue)}</div></td>
+      <td><div style="font-weight:600;color:var(--red);">${fmtVal(row.totalPlannedCost)}</div><div style="font-size:11px;color:var(--text2);">Diretos: ${fmtVal(row.directCosts)} · Consumíveis: ${fmtVal(row.consumableCosts)} · Terceiros: ${fmtVal(row.temporaryRentalAllocated)}</div></td>
+      <td><div style="font-weight:700;color:${row.projectedProfit>=0?'var(--green)':'var(--red)'};">${fmtVal(row.projectedProfit)}</div><div style="font-size:11px;color:var(--text2);">Realizado: ${fmtVal(row.realizedProfit)}</div></td>
+      <td>${marginLabel}</td>
+      <td><span class="badge ${profitClass}">${row.projectedProfit>=0?'positivo':'negativo'}</span><div style="font-size:11px;color:var(--text2);margin-top:4px;">${esc(row.event.status||'sem status')}</div></td>
+    </tr>`;
+  }).join('')||'<tr><td colspan="6" style="text-align:center;padding:18px;color:var(--text2);">Nenhum evento encontrado.</td></tr>'}
+  </table></div></div>`;
+}
+
 // ORCAMENTOS
 function pgOrcamentos(){
   const sc={pendente:'b-amber',aprovado:'b-green',rejeitado:'b-red',alterar:'b-blue'};
@@ -4870,6 +5776,12 @@ const MODS={
       </div>
       <div style="font-size:11px;color:var(--text2);margin-top:6px;">Esse bloco permite acrescentar equipamentos mesmo após aprovação. Se a saída já estiver concluída, a reserva é ajustada automaticamente ao salvar.</div>
     </div>
+    <div class="fg"><label class="fl">Equipamentos de Terceiros extras</label>
+      <div style="border:1px solid var(--border);border-radius:10px;padding:8px;max-height:180px;overflow:auto;display:flex;flex-direction:column;gap:6px;">
+        ${renderEventTempEquipSelector('editEvent',ev,ev.extraEquipPlan||[])}
+      </div>
+      <div style="font-size:11px;color:var(--text2);margin-top:6px;">Ao salvar, a despesa de aluguel é lançada automaticamente em Contas a Pagar com vínculo ao evento.</div>
+    </div>
     <div class="fg"><label class="fl">Consumíveis extras do evento</label>
       <input id="editEventConsSearch" class="fc" placeholder="Pesquisar por nome ou categoria" style="margin-bottom:8px;" oninput="filterEventItemSelector('editEvent','Cons')">
       <div style="border:1px solid var(--border);border-radius:10px;padding:8px;max-height:190px;overflow:auto;display:flex;flex-direction:column;gap:6px;">
@@ -4877,6 +5789,13 @@ const MODS={
         <div id="editEventConsEmpty" class="empty" style="padding:10px 8px;display:none;">Nenhum consumível encontrado para a pesquisa.</div>
       </div>
       <div style="font-size:11px;color:var(--text2);margin-top:6px;">Ao salvar, o estoque é ajustado pela diferença e o checklist automático é recalculado para esses itens.</div>
+    </div>
+    <div class="fg"><label class="fl">Custos extras do evento</label>
+      ${renderEventExtraCostEditor('editEvent',ev)}
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:8px;">
+        <div style="font-size:11px;color:var(--text2);">Cadastre aqui custos como funcionários, combustível, alimentação e pedágio. Eles entram direto no resultado do evento.</div>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="addEventExtraCostRow('editEvent')">+ Adicionar custo</button>
+      </div>
     </div>
     <div style="margin-top:6px;"><button class="btn btn-ghost" style="color:var(--red);border-color:rgba(255,74,74,.25);" onclick="deleteEvent(${ev.id})">🗑 Excluir evento</button></div>
     <div class="fg"><label class="fl">Observações</label><textarea id="editEventNotes" class="fc">${esc(ev.notes||'')}</textarea></div>`;
@@ -4943,19 +5862,32 @@ const MODS={
     },
     ok:addConsumableEntry
   },
-  addMaintenance:{title:'+ Adicionar Equipamento para Manutenção',body:`
-    <div class="fg"><label class="fl">Equipamento</label><select id="mEquip" class="fc">${DB.equipment.map(e=>`<option value="${e.id}">${e.name} · ${formatEquipmentIdentity(e).label}</option>`).join('')}</select></div>
+  addMaintenance:{title:'+ Adicionar Equipamento para Manutenção',body:()=>{
+    const companyId=Number(S.companyId||1);
+    const maintenanceEquipment=DB.equipment.filter(e=>Number(e.empresa_id||companyId)===companyId&&!e.temporary);
+    if(!maintenanceEquipment.length){
+      return '<div class="empty"><div class="empty-ico">🔧</div><div>Nenhum equipamento permanente disponível para manutenção nesta empresa.</div></div>';
+    }
+    return `
+    <div class="fg"><label class="fl">Equipamento</label><select id="mEquip" class="fc">${maintenanceEquipment.map(e=>`<option value="${e.id}">${e.name} · ${formatEquipmentIdentity(e).label}</option>`).join('')}</select></div>
     <div class="fg"><label class="fl">Serviço</label><input id="mService" class="fc" placeholder="Ex: Troca de placa, revisão elétrica"></div>
     <div class="fg"><label class="fl">Peças</label><input id="mParts" class="fc" placeholder="Ex: Fonte, cabo XLR, conectores"></div>
     <div class="fg"><label class="fl">Prestador</label><input id="mProvider" class="fc" placeholder="Nome da empresa/técnico"></div>
     <div class="grid g3"><div class="fg"><label class="fl">Quantidade em Manutenção</label><input id="mQty" type="number" min="1" step="1" class="fc" value="1"></div><div class="fg"><label class="fl">Custo (R$)</label><input id="mCost" type="number" min="0" step="0.01" class="fc" placeholder="0,00"></div><div class="fg"><label class="fl">Data</label><input id="mDate" type="date" class="fc" value="${new Date().toISOString().slice(0,10)}"></div></div>
-  `,
+  `;
+  },
     ok:addMaintenanceRecord},
   addTask:{title:'+ Nova Tarefa',body:()=>{
     const isOperational=S.tabs.checklistType==='operacional';
+    const pendingMaintenance=(DB.maintenance||[]).filter(item=>String(item.status||'pendente')!=='feito');
     return`
     <div class="fg"><label class="fl">Descrição da Tarefa</label><input id="addTaskDesc" class="fc" placeholder="O que precisa ser feito?"></div>
-    <div class="fg"><label class="fl">Tipo</label><select id="addTaskType" class="fc"><option value="operacional" ${isOperational?'selected':''}>Operacional</option><option value="saida" ${isOperational?'':'selected'}>Saída</option><option value="montagem">Montagem</option><option value="desmontagem">Desmontagem</option><option value="entrega">Entrega</option></select></div>
+    <div class="fg"><label class="fl">Tipo</label><select id="addTaskType" class="fc" onchange="onAddTaskTypeChange()"><option value="operacional" ${isOperational?'selected':''}>Operacional</option><option value="saida" ${isOperational?'':'selected'}>Saída</option><option value="montagem">Montagem</option><option value="desmontagem">Desmontagem</option><option value="entrega">Entrega</option></select></div>
+    <div class="fg"><label class="fl">Vínculo</label><select id="addTaskLinkKind" class="fc" onchange="onAddTaskLinkKindChange()">${isOperational?'<option value="none">Manual</option><option value="maintenance">Vincular manutenção</option>':'<option value="none">Manual</option><option value="stock">Vincular item do estoque</option>'}</select></div>
+    <div id="addTaskStockWrap" class="fg" style="display:none;"><label class="fl">Item do Estoque</label><select id="addTaskStock" class="fc"><option value="">Selecione...</option><optgroup label="Equipamentos Permanentes">${DB.equipment.map(eq=>`<option value="equipment:${eq.id}">${esc(eq.name)} · ${esc(formatEquipmentIdentity(eq).label)}</option>`).join('')}</optgroup><optgroup label="Consumíveis">${DB.consumables.map(item=>`<option value="consumable:${item.id}">${esc(item.name)} · ${esc(normalizeConsumableCategory(item.category,item.name))}</option>`).join('')}</optgroup></select></div>
+    <div id="addTaskQtyWrap" class="fg" style="display:none;"><label class="fl">Quantidade vinculada</label><input id="addTaskQty" type="number" min="1" step="1" class="fc" value="1"></div>
+    <div id="addTaskMaintenanceWrap" class="fg" style="display:none;"><label class="fl">Manutenção</label><select id="addTaskMaintenance" class="fc"><option value="">Selecione...</option>${pendingMaintenance.map(item=>{const eq=DB.equipment.find(e=>Number(e.id)===Number(item.equipId));return `<option value="${item.id}">${esc(eq?.name||'Equipamento')} · ${esc(item.service||'Serviço')} · ${esc(item.status||'pendente')}</option>`;}).join('')}</select></div>
+    <p id="addTaskLinkHelp" style="font-size:10.5px;color:var(--text3);margin-top:6px;">A tarefa será criada manualmente no tipo selecionado.</p>
     `;
   },
     ok:addTaskHandler},
@@ -5028,8 +5960,15 @@ const MODS={
         ${['Som','Iluminação','Estrutura','Painel de LED','Gerador','Vídeo','DJ'].map(cat=>`<label style="display:flex;align-items:center;gap:5px;font-size:12.5px;cursor:pointer;"><input type="checkbox" name="proposalService" value="${cat}"> ${cat}</label>`).join('')}
       </div>
     </div>
-    <div class="fg"><label class="fl">Equipamentos (com disponibilidade por data)</label><div id="proposalEquipList" style="display:flex;flex-direction:column;gap:6px;">
-      ${DB.equipment.map(eq=>{const meta=formatEquipmentIdentity(eq);return `<label style="display:flex;align-items:center;gap:8px;font-size:12.5px;cursor:pointer;"><input id="proposalEq-${eq.id}" data-eq-check="1" type="checkbox" value="${eq.id}" onchange="toggleProposalQtyInput(${eq.id})"><span style="flex:1;min-width:0;"><div style="font-weight:500;">${eq.name}</div><div style="font-size:10.5px;color:var(--text2);">${meta.label}</div></span><span style="margin-left:auto;display:flex;align-items:center;gap:6px;">Qtd.<input id="proposalQty-${eq.id}" type="number" min="1" step="1" value="1" class="fc" style="width:72px;padding:4px 6px;font-size:11.5px;" disabled onchange="updateProposalAvailabilityPreview()"></span></label>`;}).join('')}
+    <div class="fg"><label class="fl">Itens do Orçamento (permanentes, terceiros e consumíveis)</label><div id="proposalEquipList" style="display:flex;flex-direction:column;gap:6px;">
+      <div style="font-size:11px;color:var(--text3);font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin:2px 0 4px;">Permanentes</div>
+      ${DB.equipment.filter(e=>!e.temporary).map(eq=>{const meta=formatEquipmentIdentity(eq);return `<label style="display:flex;align-items:center;gap:8px;font-size:12.5px;cursor:pointer;"><input id="proposalEq-${eq.id}" data-eq-check="1" type="checkbox" value="${eq.id}" onchange="toggleProposalQtyInput(${eq.id})"><span style="flex:1;min-width:0;"><div style="font-weight:500;">${eq.name}</div><div style="font-size:10.5px;color:var(--text2);">${meta.label}</div></span><span style="margin-left:auto;display:flex;align-items:center;gap:6px;">Qtd.<input id="proposalQty-${eq.id}" type="number" min="1" step="1" value="1" class="fc" style="width:72px;padding:4px 6px;font-size:11.5px;" disabled onchange="updateProposalAvailabilityPreview()"></span></label>`;}).join('')}
+      <div style="height:1px;background:var(--border);margin:4px 0;"></div>
+      <div style="font-size:11px;color:var(--text3);font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin:2px 0 4px;">Terceiros (Aluguel)</div>
+      ${DB.equipment.filter(e=>e.temporary).map(eq=>{const meta=formatEquipmentIdentity(eq);const rentalCost=Math.max(0,Number(eq.rentalCost||0));return `<label style="display:flex;align-items:center;gap:8px;font-size:12.5px;cursor:pointer;"><input id="proposalEq-${eq.id}" data-eq-check="1" type="checkbox" value="${eq.id}" onchange="toggleProposalQtyInput(${eq.id})"><span style="flex:1;min-width:0;"><div style="font-weight:500;">${eq.name} <span class="badge b-purple" style="font-size:9px;vertical-align:middle;">Terceiro</span></div><div style="font-size:10.5px;color:var(--text2);">${meta.label} · Aluguel: <strong style="color:var(--red)">${fmtVal(rentalCost)}/evento</strong></div></span><span style="margin-left:auto;display:flex;align-items:center;gap:6px;">Qtd.<input id="proposalQty-${eq.id}" type="number" min="1" step="1" value="1" class="fc" style="width:72px;padding:4px 6px;font-size:11.5px;" disabled onchange="updateProposalAvailabilityPreview()"></span></label>`;}).join('')||'<div style="font-size:11.5px;color:var(--text2);">Nenhum equipamento de terceiros cadastrado.</div>'}
+      <div style="height:1px;background:var(--border);margin:4px 0;"></div>
+      <div style="font-size:11px;color:var(--text3);font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin:2px 0 4px;">Consumíveis (opcional)</div>
+      ${DB.consumables.map(item=>`<label style="display:flex;align-items:center;gap:8px;font-size:12.5px;cursor:pointer;"><input id="proposalCons-${item.id}" data-cons-check="1" type="checkbox" value="${item.id}" onchange="toggleProposalConsQtyInput(${item.id})"><span style="flex:1;min-width:0;"><div style="font-weight:500;">${esc(item.name)}</div><div style="font-size:10.5px;color:var(--text2);">${Math.max(0,Number(item.qtyStock||0))} ${esc(item.unit||'unidade')} em estoque</div></span><span style="margin-left:auto;display:flex;align-items:center;gap:6px;">Qtd.<input id="proposalConsQty-${item.id}" type="number" min="1" step="1" value="1" class="fc" style="width:72px;padding:4px 6px;font-size:11.5px;" disabled></span></label>`).join('')}
     </div></div>
     <div class="fg"><label class="fl">Disponibilidade na data</label><div id="proposalAvailPreview" style="max-height:180px;overflow:auto;background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);padding:8px;"></div></div>
     <div class="fg"><label class="fl">Observações</label><textarea class="fc" placeholder="Condições, formas de pagamento..."></textarea></div>`,
@@ -5119,6 +6058,7 @@ function renderModal(){
   if(S.modal==='newProposal')setTimeout(updateProposalAvailabilityPreview,0);
   if(S.modal==='addClient')setTimeout(onClientTypeChange,0);
   if(S.modal==='editClient')setTimeout(onEditClientTypeChange,0);
+  if(S.modal==='addTask')setTimeout(onAddTaskTypeChange,0);
   return`<div class="modal-ov open" onclick="if(event.target===this)closeM()">
   <div class="modal">
     <div class="modal-hd"><span class="modal-title">${title}</span><button class="btn btn-ghost btn-icon" onclick="closeM()" style="font-size:19px;border:none;line-height:1;">×</button></div>
@@ -5187,11 +6127,12 @@ function renderLogin(){
   <div class="fg"><label class="fl">Nome da Empresa <span style="color:var(--red)">*</span></label><input class="fc" id="rEmpresa" placeholder="Ex: Som & Luz Produções Ltda"></div>
   <div class="grid g2"><div class="fg"><label class="fl">CNPJ</label><input class="fc" id="rCnpj" placeholder="00.000.000/0001-00"></div><div class="fg"><label class="fl">Telefone</label><input class="fc" id="rPhone" placeholder="(00) 00000-0000"></div></div>
   <div class="fg"><label class="fl">E-mail Comercial</label><input class="fc" type="email" id="rCompanyEmail" placeholder="contato@suaempresa.com"></div>
+  <div class="fg"><label class="fl">Cidade/UF (documentos)</label><input class="fc" id="rCity" placeholder="Ex: Anápolis/GO"></div>
   <div class="fg"><label class="fl">Endereço</label><input class="fc" id="rAddress" placeholder="Rua, número, cidade e UF"></div>
   <div class="fg"><label class="fl">Especialidades</label><input class="fc" id="rSpecialties" placeholder="Som, Iluminação, Estrutura..."></div>
   <div class="fg"><label class="fl">Seu Nome Completo <span style="color:var(--red)">*</span></label><input class="fc" id="rNome" placeholder="Ex: Rafael Moura"></div>
   <div class="fg"><label class="fl">Email (login do admin) <span style="color:var(--red)">*</span></label><input class="fc" type="email" id="rEmail" placeholder="admin@suaempresa.com"></div>
-  <div class="fg"><label class="fl">Senha <span style="color:var(--red)">*</span></label><input class="fc" type="password" id="rSenha" placeholder="Mínimo 6 caracteres"></div>
+  <div class="fg"><label class="fl">Senha <span style="color:var(--red)">*</span></label><input class="fc" type="password" id="rSenha" placeholder="Maiúscula, minúscula, número + caractere especial" onkeyup="updatePasswordStrengthDisplay('rSenha', 'strength-register')"><div id="strength-register" style="margin-top:6px;font-size:12px;color:var(--muted);"></div></div>
   <div class="fg"><label class="fl">Confirmar Senha <span style="color:var(--red)">*</span></label><input class="fc" type="password" id="rSenha2" placeholder="Repita a senha"></div>
   <div style="background:var(--bg2);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:11.5px;color:var(--text2);">
     <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;">
@@ -5209,9 +6150,8 @@ function renderLogin(){
     <div style="font-family:var(--fh);font-size:22px;font-weight:800;">EventPro</div>
     <div style="color:var(--text2);font-size:13px;margin-top:4px;">Gestão profissional de eventos</div>
   </div>
-  <div class="fg"><label class="fl">Email</label><input class="fc" type="email" id="lemail" value="rafael@eventpro.com"></div>
-  <div class="fg"><label class="fl">Senha</label><input class="fc" type="password" id="lpass" value="123456"></div>
-  <div style="font-size:11px;color:var(--text3);margin:-4px 0 10px;">Perfis de teste: admin/manager/employee (senha padrão: 123456)</div>
+  <div class="fg"><label class="fl">Email</label><input class="fc" type="email" id="lemail" placeholder="seuemail@empresa.com"></div>
+  <div class="fg"><label class="fl">Senha</label><input class="fc" type="password" id="lpass" placeholder="Sua senha"></div>
   <div style="display:flex;justify-content:flex-end;margin-bottom:18px;"><span style="font-size:12px;color:var(--accent2);cursor:pointer;" onclick="openForgotPasswordView()">Esqueci a senha</span></div>
   <button class="btn btn-primary" style="width:100%;justify-content:center;padding:11px;font-size:14px;" onclick="doLogin()">Entrar no EventPro</button>
   <div style="text-align:center;margin-top:14px;font-size:12px;color:var(--text2);">Não tem conta? <span style="color:var(--accent2);cursor:pointer;font-weight:600;" onclick="S.loginView='register';render()">Criar conta gratuita</span></div>
@@ -5263,6 +6203,7 @@ async function registerEmpresa(){
   const companyCnpj=(document.getElementById('rCnpj')?.value||'').trim();
   const companyPhone=(document.getElementById('rPhone')?.value||'').trim();
   const companyContactEmail=(document.getElementById('rCompanyEmail')?.value||'').trim().toLowerCase();
+  const companyCity=(document.getElementById('rCity')?.value||'').trim();
   const companyAddress=(document.getElementById('rAddress')?.value||'').trim();
   const companySpecialties=(document.getElementById('rSpecialties')?.value||'').trim();
   const nomeAdmin=(document.getElementById('rNome')?.value||'').trim();
@@ -5275,7 +6216,9 @@ async function registerEmpresa(){
   if(!nomeAdmin){toast('Informe seu nome completo.','err');return;}
   if(!email||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){toast('Informe um email válido.','err');return;}
   if(companyContactEmail&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(companyContactEmail)){toast('Informe um e-mail comercial válido.','err');return;}
-  if(senha.length<6){toast('A senha deve ter pelo menos 6 caracteres.','err');return;}
+  if(companyCnpj&&!isValidCNPJ(companyCnpj)){toast('CNPJ inválido. Verifique e tente novamente.','err');return;}
+  if(senha.length<8){toast('A senha deve ter no mínimo 8 caracteres.','err');return;}
+  if(!isStrongPassword(senha)){const strength=getPasswordStrength(senha);toast('Senha fraca. Use maiúsculas, minúsculas, números e caracteres especiais. Força: '+strength.label,'err');return;}
   if(senha!==senha2){toast('As senhas não conferem.','err');return;}
   if(!lgpd){toast('Aceite os termos de uso de dados (LGPD) para continuar.','err');return;}
 
@@ -5297,6 +6240,7 @@ async function registerEmpresa(){
     name:nomeEmpresa,
     owner:nomeAdmin,
     cnpj:companyCnpj,
+    city:companyCity||extractCityUFFromAddress(companyAddress),
     address:companyAddress,
     phone:companyPhone,
     email:companyContactEmail||email,
@@ -5333,7 +6277,7 @@ async function registerEmpresa(){
 const PAGES={
   dashboard:pgDashboard,agenda:pgAgenda,estoque:pgEstoque,manutencao:pgManutencao,checklist:pgChecklist,
   objetivos_compras:pgObjetivosCompras,categorias_estoque:pgCategoriasEstoque,
-  financeiro:pgFinanceiro,orcamentos:pgOrcamentos,contratos:pgContratos,
+  financeiro:pgFinanceiro,resultados_evento:pgResultadosEvento,orcamentos:pgOrcamentos,contratos:pgContratos,
   clientes:pgClientes,equipe:pgEquipe,nps:pgNPS,notifs:pgNotifs,configuracoes:pgConfig,
 };
 
@@ -5341,7 +6285,7 @@ function render(){
   const root=document.getElementById('root');
   if(!S.in){root.innerHTML=renderLogin();return;}
   const pg=(PAGES[S.page]||pgDashboard)();
-  root.innerHTML=`<div id="app">
+  root.innerHTML=`<div id="app" class="${S.sidebarCollapsed?'sidebar-collapsed':''}">
     ${renderSidebar()}
     <div id="main">
       ${renderTopbar()}

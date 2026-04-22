@@ -87,10 +87,17 @@
     const client = getClient();
     if(!client)return { data:null, error:new Error('Supabase indisponivel no navegador.') };
     try{
-      return await client.auth.updateUser({
+      const response = await client.auth.updateUser({
         password:newPassword,
       });
+      if(response?.error)return { data:null, error:response.error };
+      await new Promise(r=>setTimeout(r,500));
+      const { data, error } = await client.auth.getSession();
+      if(error)console.warn('Erro ao verificar sessão após atualização:',error);
+      console.log('Senha atualizada com sucesso. Sessão atual:',data?.session?'Ativa':'Inativa');
+      return response;
     }catch(error){
+      console.error('Erro crítico ao atualizar senha:',error);
       return { data:null, error };
     }
   }
