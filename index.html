@@ -6670,13 +6670,14 @@ async function doLogin(){
     let cloudSessionReady=false;
     if(window.EventProSupabase){
       const ensured=await ensureSupabaseAuthForLocalUser(candidate,pass);
-      if(ensured?.error){
-        console.warn('Login/provisionamento Supabase falhou; sync entre dispositivos ficará indisponível:',ensured.error);
-      }else{
-        cloudSessionReady=!!ensured?.session;
-        if(ensured?.created){
-          toast('Login na nuvem criado automaticamente para este usuário.','ok');
-        }
+      if(ensured?.error||!ensured?.session){
+        console.warn('Login/provisionamento Supabase falhou:',ensured?.error||'sem sessão');
+        toast('Não foi possível autenticar no Supabase para este usuário. Use recuperação de senha do email da conta e tente novamente.','err');
+        return;
+      }
+      cloudSessionReady=true;
+      if(ensured?.created){
+        toast('Login na nuvem criado automaticamente para este usuário.','ok');
       }
     }
 
@@ -6728,8 +6729,6 @@ async function doLogin(){
           console.warn('Erro ao aplicar snapshot da nuvem:',syncErr);
         }
       }).catch(function(e){ console.warn('Cloud sync pull falhou (não crítico):',e); });
-    }else if(window.EventProSupabase){
-      toast('Entrou no app, mas sem sync entre dispositivos. Verifique Auth do Supabase para este usuário.','warn');
     }
   }catch(err){
     console.error('Erro no login:',err);
@@ -6780,7 +6779,8 @@ async function registerEmpresa(){
       cloudSession=await window.EventProSupabase.refreshSession();
     }
     if(!cloudSession){
-      toast('Conta criada, mas sem sessão ativa no Supabase. Verifique confirmação de e-mail no Auth.','warn');
+      toast('Conta ainda sem sessão Supabase ativa. Confirme o e-mail da conta (Auth) e tente novamente.','err');
+      return;
     }
   }
 
