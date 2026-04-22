@@ -430,13 +430,11 @@ const DB = {
   ],
   auditLogs:[],
   paymentMethods:[
-    {id:1,name:'Pix',description:'Transferência instantânea via Pix'},
-    {id:2,name:'50% Sinal + 50% no Evento',description:'50% na assinatura do contrato, saldo no dia do evento'},
-    {id:3,name:'Integral (24h antes)',description:'Pagamento integral 24 horas antes do evento'},
-    {id:4,name:'Boleto Bancário',description:'Boleto bancário com vencimento acordado'},
-    {id:5,name:'Cartão de Crédito',description:'Parcelamento em cartão de crédito'},
-    {id:6,name:'Dinheiro',description:'Pagamento em espécie'},
-    {id:7,name:'Transferência (TED/DOC)',description:'Transferência bancária TED ou DOC'},
+    {id:1,name:'PIX',description:'Transferência instantânea via PIX'},
+    {id:2,name:'Cartão',description:'Pagamento com cartão de crédito ou débito'},
+    {id:3,name:'PIX (Entrada + Restante)',description:'Entrada e saldo via PIX com datas definidas em contrato'},
+    {id:4,name:'TED',description:'Transferência bancária TED'},
+    {id:5,name:'BK',description:'Pagamento bancário BK'},
   ]
 };
 
@@ -461,6 +459,13 @@ let clists = {
 const MT_TABLES=['events','equipment','clients','proposals','contracts','maintenance','consumables','objectivesPurchases','team','nps','auditLogs','paymentMethods','recurringExpenses'];
 const DEFAULT_END_CLIENT_NAME='Cliente Final';
 const DEFAULT_END_CLIENT_EMAIL='cliente.final@nao-informado.local';
+const DEFAULT_PAYMENT_METHODS=[
+  {name:'PIX',description:'Transferência instantânea via PIX'},
+  {name:'Cartão',description:'Pagamento com cartão de crédito ou débito'},
+  {name:'PIX (Entrada + Restante)',description:'Entrada e saldo via PIX com datas definidas em contrato'},
+  {name:'TED',description:'Transferência bancária TED'},
+  {name:'BK',description:'Pagamento bancário BK'},
+];
 let DB_ALL=null;
 let CLISTS_ALL={};
 
@@ -550,6 +555,33 @@ function normalizeClistsStore(raw){
   return{'1':raw};
 }
 
+function paymentMethodKey(name){
+  return String(name||'')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g,'')
+    .replace(/\s+/g,' ')
+    .trim();
+}
+
+function ensureDefaultPaymentMethodsForStore(store){
+  store.paymentMethods=Array.isArray(store.paymentMethods)?store.paymentMethods:[];
+  const existing=new Set(store.paymentMethods.map(pm=>paymentMethodKey(pm?.name)));
+  let idCursor=store.paymentMethods.length?Math.max(...store.paymentMethods.map(pm=>Number(pm?.id||0))):0;
+  DEFAULT_PAYMENT_METHODS.forEach((base)=>{
+    const key=paymentMethodKey(base.name);
+    if(existing.has(key))return;
+    idCursor+=1;
+    store.paymentMethods.push({
+      id:idCursor,
+      name:base.name,
+      description:base.description,
+      empresa_id:1,
+    });
+    existing.add(key);
+  });
+}
+
 function normalizeMultiTenantStore(data){
   const store=data&&typeof data==='object'?data:{};
   const defaultSeedUsers={
@@ -602,6 +634,7 @@ function normalizeMultiTenantStore(data){
   });
 
   MT_TABLES.forEach(t=>{store[t]=ensureEmpresaId(store[t],1);});
+  ensureDefaultPaymentMethodsForStore(store);
   if(!store.finance)store.finance={rec:[],pay:[]};
   store.finance.rec=ensureEmpresaId(store.finance.rec,1).map(r=>normalizeFinanceEntry(r,'rec'));
   store.finance.pay=ensureEmpresaId(store.finance.pay,1).map(r=>normalizeFinanceEntry(r,'pay'));
@@ -1115,7 +1148,11 @@ function userMenuAction(action){
   if(action==='logout'){logout();return;}
   nav(action);
 }
-function openM(id){S.modal=id;render();}
+function openM(id){
+  S.modal=id;
+  render();
+  if(id==='newContract')setTimeout(toggleContractPaymentDetails,0);
+}
 function closeM(){S.modal=null;render();}
 function fmtVal(v){return'R$ '+v.toLocaleString('pt-BR');}
 function nextId(arr){return arr.length?Math.max(...arr.map(i=>i.id))+1:1;}
@@ -1128,6 +1165,56 @@ function fmtDateBR(iso){
   if(!iso)return'';
   const [y,m,d]=String(iso).split('-');
   return y&&m&&d?`${d}/${m}/${y}`:iso;
+}
+
+function contractPaymentUsesPixEntryBalance(paymentId){
+  const method=DB.paymentMethods.find(pm=>Number(pm.id)===Number(paymentId));
+  const key=paymentMethodKey(method?.name||'');
+  return key==='pix (entrada + restante)'||(/pix/.test(key)&&/entrada/.test(key)&&/restante/.test(key));
+}
+
+function getSelectedContractEvent(){
+  const eid=Number(document.getElementById('newContractEvent')?.value||S.contractPrefillEventId||0);
+  return DB.events.find(e=>Number(e.id)===Number(eid))||null;
+}
+
+function updateContractSplitRemainingFromEntry(){
+  const ev=getSelectedContractEvent();
+  const total=Number(ev?.value||0);
+  const entryField=document.getElementById('contractEntryValue');
+  const remainingField=document.getElementById('contractRemainingValue');
+  if(!entryField||!remainingField||total<=0)return;
+  const entry=Math.max(0,Number(entryField.value||0));
+  const remaining=Math.max(0,total-entry);
+  remainingField.value=remaining.toFixed(2);
+}
+
+function toggleContractPaymentDetails(){
+  const paymentId=Number(document.getElementById('contractPayment')?.value||0);
+  const wrap=document.getElementById('contractPixSplitWrap');
+  if(!wrap)return;
+  const active=contractPaymentUsesPixEntryBalance(paymentId);
+  wrap.style.display=active?'block':'none';
+  if(!active)return;
+
+  const ev=getSelectedContractEvent();
+  const total=Number(ev?.value||0);
+  const entryField=document.getElementById('contractEntryValue');
+  const remainingField=document.getElementById('contractRemainingValue');
+  const entryDueField=document.getElementById('contractEntryDue');
+  const remainingDueField=document.getElementById('contractRemainingDue');
+  if(entryField&&!entryField.value){
+    entryField.value=(total>0?(total*0.5):0).toFixed(2);
+  }
+  if(remainingField&&!remainingField.value){
+    updateContractSplitRemainingFromEntry();
+  }
+  if(entryDueField&&!entryDueField.value){
+    entryDueField.value=new Date().toISOString().slice(0,10);
+  }
+  if(remainingDueField&&!remainingDueField.value){
+    remainingDueField.value=ev?.date||new Date().toISOString().slice(0,10);
+  }
 }
 
 function extractCityUFFromAddress(address){
@@ -1826,6 +1913,14 @@ function generateContractPDF(ev,contract,cl){
   const valorNum=fmtVal(ev.value||0);
   const valorExt=valorPorExtenso(ev.value||0);
   const logoB64=DB.company.logo||'';
+  const paymentParcels=Array.isArray(contract?.paymentPlan?.parcels)?contract.paymentPlan.parcels:[];
+  const paymentMethodName=String(contract.payment||'').trim();
+  let clause5PaymentText=`com pagamento integral no <strong>${esc(paymentMethodName||'método acordado')}</strong>`;
+  if(contract?.paymentPlan?.mode==='pix-entry-balance'&&paymentParcels.length>=2){
+    const entrada=paymentParcels[0]||{};
+    const restante=paymentParcels[1]||{};
+    clause5PaymentText=`com pagamento via <strong>PIX</strong>, sendo <strong>entrada de ${esc(fmtVal(Number(entrada.value||0)))}</strong> com vencimento em <strong>${esc(fmtDateBR(String(entrada.due||'')))}</strong> e <strong>restante de ${esc(fmtVal(Number(restante.value||0)))}</strong> com vencimento em <strong>${esc(fmtDateBR(String(restante.due||'')))}</strong>`;
+  }
 
   const html=`<!DOCTYPE html>
 <html lang="pt-BR">
@@ -1878,7 +1973,7 @@ h1{font-size:13px;text-align:center;text-transform:uppercase;font-weight:bold;ma
 
 <div class="clause"><span class="clause-title">Cláusula 4ª.</span> O endereço onde os bens serão entregues e instalados será no <strong>${esc(ev.venue)}</strong>.</div>
 
-<div class="clause"><span class="clause-title">Cláusula 5ª.</span> O valor do aluguel dos equipamentos e a prestação de serviços, será de <strong>R$ ${valorNum} (${valorExt})</strong>, a ser pago pelo LOCATÁRIO/CONTRATANTE, com pagamento integral no <strong>${esc(contract.payment)}</strong>.${contract.notes?` ${esc(contract.notes)}`:''}</div>
+<div class="clause"><span class="clause-title">Cláusula 5ª.</span> O valor do aluguel dos equipamentos e a prestação de serviços será de <strong>${valorNum} (${valorExt})</strong>, a ser pago pelo LOCATÁRIO/CONTRATANTE, ${clause5PaymentText}.${contract.notes?` ${esc(contract.notes)}`:''}</div>
 
 <div class="clause"><span class="clause-title">Cláusula 6ª.</span> Caso o pagamento não ocorra no prazo mencionado na cláusula anterior este contrato será automaticamente rescindido incorrendo o LOCATÁRIO/CONTRATANTE em multa de 10% do valor do contrato.</div>
 
@@ -1960,6 +2055,39 @@ function createContract(){
   const services=checkedServices.join(', ')||'Som e Iluminação';
 
   if(!services){toast('Selecione pelo menos uma categoria de serviços.','err');return false;}
+
+  let paymentPlan=null;
+  const eventTotal=Math.round(Number(ev.value||0)*100)/100;
+  if(contractPaymentUsesPixEntryBalance(paymentId)){
+    const entryVal=Math.round(Number(document.getElementById('contractEntryValue')?.value||0)*100)/100;
+    const remainingRaw=document.getElementById('contractRemainingValue')?.value;
+    const remainingVal=Math.round(Number(remainingRaw!==''?remainingRaw:(eventTotal-entryVal))*100)/100;
+    const entryDue=(document.getElementById('contractEntryDue')?.value||'').trim();
+    const remainingDue=(document.getElementById('contractRemainingDue')?.value||'').trim();
+
+    if(entryVal<=0||remainingVal<=0){
+      toast('Informe valores válidos para entrada e restante.','err');
+      return false;
+    }
+    if(!entryDue||!remainingDue){
+      toast('Informe as datas de pagamento da entrada e do restante.','err');
+      return false;
+    }
+    if(eventTotal>0){
+      const diff=Math.abs((entryVal+remainingVal)-eventTotal);
+      if(diff>0.01){
+        toast(`Entrada + restante deve fechar o valor do evento (${fmtVal(eventTotal)}).`,'err');
+        return false;
+      }
+    }
+    paymentPlan={
+      mode:'pix-entry-balance',
+      parcels:[
+        {label:'Entrada PIX',value:entryVal,due:entryDue},
+        {label:'Restante PIX',value:remainingVal,due:remainingDue},
+      ],
+    };
+  }
   
   const contract={
     id:nextId(DB.contracts),
@@ -1972,6 +2100,7 @@ function createContract(){
     duration,
     payment:pm?pm.name:'',
     paymentId:pm?pm.id:null,
+    paymentPlan,
     penalty:10,
     notes,
     createdAt:new Date().toISOString().slice(0,10),
@@ -2017,7 +2146,17 @@ function generateContractReceivables(contract,ev){
   const creationDue=contract.createdAt||new Date().toISOString().slice(0,10);
 
   const parcels=[];
-  if(/50\s*%/.test(planText)&&/sinal|entrada/.test(planText)){
+  if(Array.isArray(contract?.paymentPlan?.parcels)&&contract.paymentPlan.parcels.length){
+    contract.paymentPlan.parcels.forEach((p)=>{
+      const value=Math.round(Number(p.value||0)*100)/100;
+      if(value<=0)return;
+      parcels.push({
+        label:String(p.label||'Parcela'),
+        value,
+        due:String(p.due||eventDue),
+      });
+    });
+  }else if(/50\s*%/.test(planText)&&/sinal|entrada/.test(planText)){
     const first=Math.round(totalValue*0.5*100)/100;
     const second=Math.round((totalValue-first)*100)/100;
     parcels.push({label:'Sinal 50%',value:first,due:creationDue});
@@ -2891,6 +3030,13 @@ function addPaymentMethod(){
   saveDB();
   toast('Forma de pagamento cadastrada! 💳');
   return true;
+}
+
+function resetContractPrefillEvent(eventId){
+  S.contractPrefillEventId=Number(eventId||S.contractPrefillEventId||0)||null;
+  S.contractEventTmp=S.contractPrefillEventId;
+  render();
+  setTimeout(toggleContractPaymentDetails,0);
 }
 
 function deletePaymentMethod(id){
@@ -6098,7 +6244,7 @@ const MODS={
     const cats=['Som','Iluminação','Estrutura','Painel de LED','Gerador','Vídeo','DJ'];
     
     return`
-    <div class="fg"><label class="fl">Evento</label><select id="newContractEvent" class="fc" onchange="S.contractEventTmp=Number(this.value);render()">${eventOpts}</select></div>
+    <div class="fg"><label class="fl">Evento</label><select id="newContractEvent" class="fc" onchange="resetContractPrefillEvent(this.value)">${eventOpts}</select></div>
     ${ev?`<div style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);padding:10px;margin-bottom:10px;font-size:11.5px;">
       <div><strong>Cliente:</strong> ${ev.client}</div>
       <div><strong>Data:</strong> ${ev.date} ${ev.time}${ev.endDate&&ev.endDate!==ev.date?` a ${ev.endDate} ${ev.endTime}`:''}</div>
@@ -6113,7 +6259,19 @@ const MODS={
       </div>
       <input id="contractServicesCustom" class="fc" style="margin-top:8px;" placeholder="Outros serviços (opcional)">
     </div>
-    <div class="grid g2"><div class="fg"><label class="fl">Forma de Pagamento</label><select id="contractPayment" class="fc">${DB.paymentMethods.map(pm=>`<option value="${pm.id}">${esc(pm.name)}</option>`).join('')}</select></div><div class="fg"><label class="fl">Duração do Evento (horas)</label><input id="contractDuration" type="number" class="fc" value="${ev?'6':''}"></div></div>
+    <div class="grid g2"><div class="fg"><label class="fl">Forma de Pagamento</label><select id="contractPayment" class="fc" onchange="toggleContractPaymentDetails()">${DB.paymentMethods.map(pm=>`<option value="${pm.id}">${esc(pm.name)}</option>`).join('')}</select></div><div class="fg"><label class="fl">Duração do Evento (horas)</label><input id="contractDuration" type="number" class="fc" value="${ev?'6':''}"></div></div>
+    <div id="contractPixSplitWrap" style="display:none;background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);padding:10px;margin-bottom:10px;">
+      <div style="font-size:12px;font-weight:700;margin-bottom:8px;">PIX (Entrada + Restante)</div>
+      <div class="grid g2">
+        <div class="fg"><label class="fl">Valor da Entrada (R$)</label><input id="contractEntryValue" type="number" min="0" step="0.01" class="fc" oninput="updateContractSplitRemainingFromEntry()"></div>
+        <div class="fg"><label class="fl">Data da Entrada</label><input id="contractEntryDue" type="date" class="fc"></div>
+      </div>
+      <div class="grid g2">
+        <div class="fg"><label class="fl">Valor do Restante (R$)</label><input id="contractRemainingValue" type="number" min="0" step="0.01" class="fc"></div>
+        <div class="fg"><label class="fl">Data do Restante</label><input id="contractRemainingDue" type="date" class="fc"></div>
+      </div>
+      <div style="font-size:11px;color:var(--text2);">Informe os valores e datas para gerar automaticamente as duas parcelas no financeiro.</div>
+    </div>
     <div class="fg"><label class="fl">Observações / Detalhes</label><textarea id="contractNotes" class="fc" placeholder="Informações adicionais..."></textarea></div>
     <p style="font-size:10.5px;color:var(--text3);margin-top:6px;">O contrato será gerado com base no modelo oficial da empresa.</p>`;
   },
@@ -6305,9 +6463,15 @@ async function doLogin(){
       return;
     }
 
+    let cloudSessionReady=false;
     if(window.EventProSupabase){
-      const remoteLogin = await window.EventProSupabase.signInWithPassword(email,pass);
-      if(remoteLogin?.error)console.warn('Login Supabase ignorado para preservar o fluxo local:',remoteLogin.error);
+      const remoteLogin=await window.EventProSupabase.signInWithPassword(email,pass);
+      if(remoteLogin?.error){
+        console.warn('Login Supabase falhou; sync entre dispositivos ficará indisponível:',remoteLogin.error);
+      }else{
+        const currentSession=await window.EventProSupabase.refreshSession();
+        cloudSessionReady=!!currentSession;
+      }
     }
 
     applyTenantScope(candidate);
@@ -6316,10 +6480,22 @@ async function doLogin(){
     localStorage.setItem('eventpro_session_user',String(candidate.id));
     toast(`Bem-vindo ao EventPro, ${candidate.name.split(' ')[0]}! 👋`);
     render();
-    // Carrega dados da nuvem em background e atualiza a UI se houver snapshot mais recente
-    if(window.EventProSupabase?.pullSnapshot){
+    // Carrega dados da nuvem em background somente com sessão autenticada
+    if(cloudSessionReady&&window.EventProSupabase?.pullSnapshot){
       window.EventProSupabase.pullSnapshot(candidate.empresa_id).then(function(result){
-        if(!result?.data?.db||result?.error)return;
+        if(result?.error){
+          console.warn('Cloud sync pull retornou erro:',result.error);
+          return;
+        }
+        if(!result?.data?.db){
+          // Primeira sincronização: publica snapshot local para os demais dispositivos.
+          if(window.EventProSupabase?.pushSnapshot){
+            window.EventProSupabase.pushSnapshot(candidate.empresa_id,DB_ALL,CLISTS_ALL)
+              .then(function(res){ if(res?.error)console.warn('Cloud sync seed falhou:',res.error); })
+              .catch(function(e){ console.warn('Cloud sync seed falhou:',e); });
+          }
+          return;
+        }
         try{
           const cloudDB=normalizeMultiTenantStore(result.data.db);
           const localUsers=deepClone(DB_ALL.users||[]);
@@ -6346,6 +6522,8 @@ async function doLogin(){
           console.warn('Erro ao aplicar snapshot da nuvem:',syncErr);
         }
       }).catch(function(e){ console.warn('Cloud sync pull falhou (não crítico):',e); });
+    }else if(window.EventProSupabase){
+      toast('Entrou no app, mas sem sync entre dispositivos. Verifique Auth do Supabase para este usuário.','warn');
     }
   }catch(err){
     console.error('Erro no login:',err);
