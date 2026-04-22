@@ -109,10 +109,126 @@
     }
   }
 
+  function readAuthParamsFromUrl(){
+    try{
+      const query = new URLSearchParams(window.location.search||'');
+      const hash = new URLSearchParams((window.location.hash||'').replace(/^#/,''));
+      return {
+        code:query.get('code')||null,
+        accessToken:hash.get('access_token')||null,
+        refreshToken:hash.get('refresh_token')||null,
+        tokenHash:query.get('token_hash')||hash.get('token_hash')||null,
+        type:query.get('type')||hash.get('type')||null,
+      };
+    }catch(_error){
+      return {
+        code:null,
+        accessToken:null,
+        refreshToken:null,
+        tokenHash:null,
+        type:null,
+      };
+    }
+  }
+
+  function clearRecoveryParamsFromUrl(){
+    try{
+      const url = new URL(window.location.href);
+      [
+        'code',
+        'type',
+        'token_hash',
+        'access_token',
+        'refresh_token',
+        'expires_at',
+        'expires_in',
+      ].forEach(function(key){
+        url.searchParams.delete(key);
+      });
+      const hash = new URLSearchParams((url.hash||'').replace(/^#/,''));
+      [
+        'access_token',
+        'refresh_token',
+        'expires_at',
+        'expires_in',
+        'token_type',
+        'type',
+        'token_hash',
+      ].forEach(function(key){
+        hash.delete(key);
+      });
+      const hashStr = hash.toString();
+      const sanitized = `${url.pathname}${url.search}${hashStr?`#${hashStr}`:''}`;
+      window.history.replaceState({},'',sanitized);
+    }catch(_error){
+      // noop
+    }
+  }
+
+  async function prepareRecoverySessionFromUrl(options){
+    const opts = options||{};
+    const client = getClient();
+    if(!client)return { sessionEstablished:false, error:new Error('Supabase indisponivel no navegador.') };
+
+    try{
+      const current = await client.auth.getSession();
+      if(current?.data?.session){
+        return { sessionEstablished:true, source:'existing-session', session:current.data.session, error:null };
+      }
+    }catch(_error){
+      // Continue tentando com tokens da URL.
+    }
+
+    const p = readAuthParamsFromUrl();
+    try{
+      if(p.code){
+        const exchanged = await client.auth.exchangeCodeForSession(p.code);
+        if(exchanged?.error)return { sessionEstablished:false, source:'code', session:null, error:exchanged.error };
+        clearRecoveryParamsFromUrl();
+        return { sessionEstablished:!!exchanged?.data?.session, source:'code', session:exchanged?.data?.session||null, error:null };
+      }
+
+      if(p.accessToken&&p.refreshToken){
+        const setRes = await client.auth.setSession({
+          access_token:p.accessToken,
+          refresh_token:p.refreshToken,
+        });
+        if(setRes?.error)return { sessionEstablished:false, source:'token', session:null, error:setRes.error };
+        clearRecoveryParamsFromUrl();
+        return { sessionEstablished:!!setRes?.data?.session, source:'token', session:setRes?.data?.session||null, error:null };
+      }
+
+      if(p.tokenHash&&(p.type||'').toLowerCase()==='recovery'){
+        const verified = await client.auth.verifyOtp({
+          type:'recovery',
+          token_hash:p.tokenHash,
+        });
+        if(verified?.error)return { sessionEstablished:false, source:'otp', session:null, error:verified.error };
+        clearRecoveryParamsFromUrl();
+        return { sessionEstablished:!!verified?.data?.session, source:'otp', session:verified?.data?.session||null, error:null };
+      }
+
+      if(opts.requireSession){
+        return { sessionEstablished:false, source:'missing-params', session:null, error:new Error('Link de recuperação inválido ou expirado.') };
+      }
+      return { sessionEstablished:false, source:'none', session:null, error:null };
+    }catch(error){
+      return { sessionEstablished:false, source:'exception', session:null, error };
+    }
+  }
+
   async function updateUserPassword(newPassword){
     const client = getClient();
     if(!client)return { data:null, error:new Error('Supabase indisponivel no navegador.') };
     try{
+      const prepared = await prepareRecoverySessionFromUrl({ requireSession:false });
+      if(prepared?.error){
+        console.warn('Falha ao preparar sessão de recuperação:',prepared.error);
+      }
+      const currentSession = await client.auth.getSession();
+      if(!currentSession?.data?.session){
+        return { data:null, error:new Error('Sessão de recuperação inválida ou expirada. Solicite um novo link.') };
+      }
       const response = await client.auth.updateUser({
         password:newPassword,
       });
@@ -195,6 +311,7 @@
     createManagedUser,
     signOut,
     requestPasswordRecovery,
+    prepareRecoverySessionFromUrl,
     updateUserPassword,
     listByEmpresa,
     createByEmpresa,

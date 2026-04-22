@@ -821,9 +821,17 @@ function saveDB(){
 
 async function bootstrapSupabaseBridge(){
   if(!window.EventProSupabase)return;
+  if(isResetPasswordRoute()&&window.EventProSupabase.prepareRecoverySessionFromUrl){
+    const prepared=await window.EventProSupabase.prepareRecoverySessionFromUrl({requireSession:false});
+    if(prepared?.sessionEstablished){
+      S.authRecovery.canReset=true;
+      sessionStorage.setItem('eventpro_pwd_recovery_ready','1');
+    }
+  }
   const session=await window.EventProSupabase.refreshSession();
   if(isResetPasswordRoute()&&session){
     S.authRecovery.canReset=true;
+    sessionStorage.setItem('eventpro_pwd_recovery_ready','1');
     if(!S.authRecovery.resetMessage){
       S.authRecovery.resetMessage='Defina sua nova senha para concluir a recuperação.';
     }
@@ -967,6 +975,13 @@ async function updatePasswordFromRecovery(){
 
     if(!window.EventProSupabase?.updateUserPassword){
       throw new Error('EventProSupabase indisponível para atualização de senha.');
+    }
+    if(window.EventProSupabase.prepareRecoverySessionFromUrl){
+      const prep=await window.EventProSupabase.prepareRecoverySessionFromUrl({requireSession:true});
+      if(prep?.error)throw prep.error;
+      if(prep?.sessionEstablished){
+        S.authRecovery.canReset=true;
+      }
     }
     const res=await window.EventProSupabase.updateUserPassword(newPassword);
     if(res?.error)throw res.error;

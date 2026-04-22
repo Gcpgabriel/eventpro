@@ -168,6 +168,14 @@ button:disabled{opacity:.65;cursor:not-allowed;}
       if(!window.EventProSupabase || !window.EventProSupabase.updateUserPassword){
         throw new Error('Supabase indisponível.');
       }
+      if(window.EventProSupabase.prepareRecoverySessionFromUrl){
+        const prep = await window.EventProSupabase.prepareRecoverySessionFromUrl({ requireSession:true });
+        if(prep && prep.error)throw prep.error;
+        if(prep && prep.sessionEstablished){
+          state.canReset = true;
+          sessionStorage.setItem('eventpro_pwd_recovery_ready','1');
+        }
+      }
       const response = await window.EventProSupabase.updateUserPassword(newPassword);
       if(response && response.error)throw response.error;
 
@@ -192,6 +200,18 @@ button:disabled{opacity:.65;cursor:not-allowed;}
     const persisted = sessionStorage.getItem('eventpro_pwd_recovery_ready') === '1';
     if(persisted || hasRecoveryHintInUrl()){
       state.canReset = true;
+    }
+
+    try{
+      if(window.EventProSupabase && window.EventProSupabase.prepareRecoverySessionFromUrl){
+        const prep = await window.EventProSupabase.prepareRecoverySessionFromUrl({ requireSession:false });
+        if(prep && prep.sessionEstablished){
+          state.canReset = true;
+          sessionStorage.setItem('eventpro_pwd_recovery_ready','1');
+        }
+      }
+    }catch(err){
+      console.warn('Falha ao processar parâmetros do link de recovery:',err);
     }
 
     try{
