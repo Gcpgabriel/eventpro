@@ -552,6 +552,11 @@ function normalizeClistsStore(raw){
 
 function normalizeMultiTenantStore(data){
   const store=data&&typeof data==='object'?data:{};
+  const defaultSeedUsers={
+    'rafael@eventpro.com':{passwordHash:'89416b510d6c7d7d72eb5090abdfa07348a4d98144989a138da925f878f9e7cf',mustResetPassword:true},
+    'carlos@eventpro.com':{passwordHash:'e8392925a98c9c22795d1fc5d0dfee5b9a6943f6b768ec5a2a0c077e5ed119cf',mustResetPassword:true},
+    'bia@eventpro.com':{passwordHash:'b4bd29480ab196faa782e0d4ecd10c2f4212814105227e5f7992f5bf4b212a64',mustResetPassword:true},
+  };
 
   if(!Array.isArray(store.companies)||!store.companies.length){
     const c=store.company||{};
@@ -572,21 +577,29 @@ function normalizeMultiTenantStore(data){
   const defaultUser=store.user||{name:'Rafael Moura',email:'rafael@eventpro.com',initials:'RM'};
   if(!Array.isArray(store.users)||!store.users.length){
     store.users=[
-      {id:1,name:defaultUser.name||'Rafael Moura',email:defaultUser.email||'rafael@eventpro.com',role:'admin',empresa_id:1,initials:defaultUser.initials||initialsFromName(defaultUser.name),password:'123456'},
-      {id:2,name:'Carlos Freitas',email:'carlos@eventpro.com',role:'manager',empresa_id:1,initials:'CF',password:'123456'},
-      {id:3,name:'Bia Rodrigues',email:'bia@eventpro.com',role:'employee',empresa_id:1,initials:'BR',password:'123456'},
+      {id:1,name:defaultUser.name||'Rafael Moura',email:defaultUser.email||'rafael@eventpro.com',role:'admin',empresa_id:1,initials:defaultUser.initials||initialsFromName(defaultUser.name),passwordHash:'89416b510d6c7d7d72eb5090abdfa07348a4d98144989a138da925f878f9e7cf',mustResetPassword:true},
+      {id:2,name:'Carlos Freitas',email:'carlos@eventpro.com',role:'manager',empresa_id:1,initials:'CF',passwordHash:'e8392925a98c9c22795d1fc5d0dfee5b9a6943f6b768ec5a2a0c077e5ed119cf',mustResetPassword:true},
+      {id:3,name:'Bia Rodrigues',email:'bia@eventpro.com',role:'employee',empresa_id:1,initials:'BR',passwordHash:'b4bd29480ab196faa782e0d4ecd10c2f4212814105227e5f7992f5bf4b212a64',mustResetPassword:true},
     ];
   }
 
-  store.users=store.users.map((u,idx)=>({
-    id:Number(u.id||idx+1),
-    name:u.name||`Usuário ${idx+1}`,
-    email:(u.email||`user${idx+1}@eventpro.com`).toLowerCase(),
-    role:roleNorm(u.role),
-    empresa_id:Number(u.empresa_id||1),
-    initials:u.initials||initialsFromName(u.name),
-    password:u.password||'123456',
-  }));
+  store.users=store.users.map((u,idx)=>{
+    const email=(u.email||`user${idx+1}@eventpro.com`).toLowerCase();
+    const seedConfig=defaultSeedUsers[email];
+    const legacyWeakPassword=String(u.password||'')==='123456';
+    const shouldUpgradeSeed=!!seedConfig&&(!u.passwordHash||legacyWeakPassword);
+    return {
+      id:Number(u.id||idx+1),
+      name:u.name||`Usuário ${idx+1}`,
+      email,
+      role:roleNorm(u.role),
+      empresa_id:Number(u.empresa_id||1),
+      initials:u.initials||initialsFromName(u.name),
+      passwordHash:shouldUpgradeSeed?seedConfig.passwordHash:(u.passwordHash||''),
+      password:shouldUpgradeSeed?'':(u.password||''),
+      mustResetPassword:Boolean(shouldUpgradeSeed?seedConfig.mustResetPassword:u.mustResetPassword),
+    };
+  });
 
   MT_TABLES.forEach(t=>{store[t]=ensureEmpresaId(store[t],1);});
   if(!store.finance)store.finance={rec:[],pay:[]};
@@ -751,6 +764,7 @@ let S = {
     resetMessage:'',
     resetError:'',
     canReset:false,
+    localUserId:null,
   },
 };
 
@@ -807,7 +821,14 @@ function saveDB(){
 
 async function bootstrapSupabaseBridge(){
   if(!window.EventProSupabase)return;
-  await window.EventProSupabase.refreshSession();
+  const session=await window.EventProSupabase.refreshSession();
+  if(isResetPasswordRoute()&&session){
+    S.authRecovery.canReset=true;
+    if(!S.authRecovery.resetMessage){
+      S.authRecovery.resetMessage='Defina sua nova senha para concluir a recuperação.';
+    }
+    render();
+  }
 }
 
 function isResetPasswordRoute(){
@@ -825,7 +846,11 @@ function setPublicRoute(path){
 function hasRecoveryHintInUrl(){
   const query=window.location.search||'';
   const hash=window.location.hash||'';
-  return /(^|[?&#])type=recovery([&#]|$)/i.test(query)||/(^|[?&#])type=recovery([&#]|$)/i.test(hash);
+  return /(^|[?&#])type=recovery([&#]|$)/i.test(query)
+    ||/(^|[?&#])type=recovery([&#]|$)/i.test(hash)
+    ||/(^|[?&#])code=([^&#]+)/i.test(query)
+    ||/(^|[?&#])access_token=([^&#]+)/i.test(hash)
+    ||/(^|[?&#])refresh_token=([^&#]+)/i.test(hash);
 }
 
 function syncAuthRecoveryRouteFromLocation(){
@@ -845,6 +870,8 @@ function goToLoginView(){
   S.authRecovery.requestMessage='';
   S.authRecovery.resetError='';
   S.authRecovery.resetMessage='';
+  S.authRecovery.localUserId=null;
+  S.authRecovery.canReset=false;
   if(isResetPasswordRoute())setPublicRoute('/');
   render();
 }
@@ -900,21 +927,9 @@ async function updatePasswordFromRecovery(){
     render();
     return;
   }
-  if(newPassword.length<PASSWORD_MIN_LEN){
-    S.authRecovery.resetError=`A senha deve ter no mínimo ${PASSWORD_MIN_LEN} caracteres.`;
-    S.authRecovery.resetMessage='';
-    render();
-    return;
-  }
-  if(!isStrongPassword(newPassword)){
-    const strength=getPasswordStrength(newPassword);
-    S.authRecovery.resetError=`Senha fraca. Use maiúsculas, minúsculas, números e caracteres especiais. Força: ${strength.label}`;
-    S.authRecovery.resetMessage='';
-    render();
-    return;
-  }
-  if(newPassword!==confirmPassword){
-    S.authRecovery.resetError='As senhas não conferem.';
+  const passwordValidation=validatePasswordPolicy(newPassword,confirmPassword);
+  if(!passwordValidation.ok){
+    S.authRecovery.resetError=passwordValidation.message;
     S.authRecovery.resetMessage='';
     render();
     return;
@@ -926,6 +941,30 @@ async function updatePasswordFromRecovery(){
   render();
 
   try{
+    if(S.authRecovery.localUserId){
+      const localUser=(DB_ALL?.users||[]).find(u=>Number(u.id)===Number(S.authRecovery.localUserId));
+      if(!localUser)throw new Error('Usuário local não encontrado para redefinição.');
+      if(window.EventProSupabase?.updateUserPassword){
+        const remoteReset=await window.EventProSupabase.updateUserPassword(newPassword);
+        if(remoteReset?.error)console.warn('Atualização de senha no Supabase não concluída no primeiro acesso:',remoteReset.error);
+      }
+      localUser.passwordHash=await hashPassword(newPassword);
+      localUser.password='';
+      localUser.mustResetPassword=false;
+      localStorage.setItem('eventpro_db_all',JSON.stringify(DB_ALL));
+      applyTenantScope(localUser);
+      S.in=true;
+      S.page='dashboard';
+      localStorage.setItem('eventpro_session_user',String(localUser.id));
+      S.authRecovery.canReset=false;
+      S.authRecovery.localUserId=null;
+      S.authRecovery.resetLoading=false;
+      S.authRecovery.resetMessage='Senha atualizada com sucesso. Bem-vindo ao EventPro.';
+      setPublicRoute('/');
+      render();
+      return;
+    }
+
     if(!window.EventProSupabase?.updateUserPassword){
       throw new Error('EventProSupabase indisponível para atualização de senha.');
     }
@@ -1258,6 +1297,22 @@ function getPasswordStrength(pwd){
   if(/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(pwd))strength++;
   const labels=['','Fraca','Média','Forte','Muito forte'];
   return {score:strength,label:labels[strength]||'Desconhecida'};
+}
+
+function validatePasswordPolicy(pwd,confirmPwd){
+  const password=String(pwd||'').trim();
+  const confirm=confirmPwd===undefined?null:String(confirmPwd||'').trim();
+  if(password.length<PASSWORD_MIN_LEN){
+    return {ok:false,message:`A senha deve ter no mínimo ${PASSWORD_MIN_LEN} caracteres.`};
+  }
+  if(!isStrongPassword(password)){
+    const strength=getPasswordStrength(password);
+    return {ok:false,message:`Senha fraca. Use maiúsculas, minúsculas, números e caracteres especiais. Força: ${strength.label}`};
+  }
+  if(confirm!==null&&password!==confirm){
+    return {ok:false,message:'As senhas não conferem.'};
+  }
+  return {ok:true};
 }
 
   function updatePasswordStrengthDisplay(inputId,displayId){
@@ -5577,7 +5632,8 @@ function openAddSystemUser(){
     <div class="modal-bd">
       <div class="fg"><label class="fl">Nome Completo <span style="color:var(--red)">*</span></label><input class="fc" id="suNome" placeholder="Ex: Carlos Freitas"></div>
       <div class="fg"><label class="fl">Email <span style="color:var(--red)">*</span></label><input class="fc" type="email" id="suEmail" placeholder="carlos@suaempresa.com"></div>
-      <div class="fg"><label class="fl">Senha <span style="color:var(--red)">*</span></label><input class="fc" type="password" id="suSenha" placeholder="Mínimo 6 caracteres"></div>
+      <div class="fg"><label class="fl">Senha <span style="color:var(--red)">*</span></label><input class="fc" type="password" id="suSenha" placeholder="Mínimo 8 caracteres + senha forte" oninput="updatePasswordStrengthDisplay('suSenha','suSenhaStrength')"><div id="suSenhaStrength" style="margin-top:6px;font-size:11px;color:var(--text2);"></div></div>
+      <div class="fg"><label class="fl">Confirmar Senha <span style="color:var(--red)">*</span></label><input class="fc" type="password" id="suSenha2" placeholder="Repita a senha"></div>
       <div class="fg"><label class="fl">Perfil <span style="color:var(--red)">*</span></label>
         <select class="fc" id="suRole">
           <option value="manager">Manager (Gerente)</option>
@@ -5601,18 +5657,29 @@ async function addSystemUser(){
   const nome=(document.getElementById('suNome')?.value||'').trim();
   const email=(document.getElementById('suEmail')?.value||'').trim().toLowerCase();
   const senha=(document.getElementById('suSenha')?.value||'').trim();
+  const senha2=(document.getElementById('suSenha2')?.value||'').trim();
   const role=(document.getElementById('suRole')?.value||'employee');
 
   if(!nome){toast('Informe o nome do usuário.','err');return;}
   if(!email||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){toast('Informe um email válido.','err');return;}
-  if(senha.length<6){toast('A senha deve ter pelo menos 6 caracteres.','err');return;}
+  const passwordValidation=validatePasswordPolicy(senha,senha2);
+  if(!passwordValidation.ok){toast(passwordValidation.message,'err');return;}
   if((DB_ALL?.users||[]).some(u=>String(u.email).toLowerCase()===email)){
     toast('Este email já está em uso.','err');return;
   }
 
+  if(window.EventProSupabase?.createManagedUser){
+    const remoteSignup=await window.EventProSupabase.createManagedUser(email,senha,{ full_name:nome, role:roleNorm(role), company_id:compId });
+    if(remoteSignup?.error){
+      console.error('Falha ao criar usuário no Supabase:',remoteSignup.error);
+      toast('Não foi possível criar o login no Supabase. Verifique Auth e tente novamente.','err');
+      return;
+    }
+  }
+
   const pwdHash=await hashPassword(senha);
   const newId=nextId(DB_ALL.users||[{id:0}]);
-  const newUser={id:newId,name:nome,email,role:roleNorm(role),empresa_id:compId,initials:initialsFromName(nome),passwordHash:pwdHash};
+  const newUser={id:newId,name:nome,email,role:roleNorm(role),empresa_id:compId,initials:initialsFromName(nome),passwordHash:pwdHash,mustResetPassword:true};
   DB_ALL.users.push(newUser);
   localStorage.setItem('eventpro_db_all',JSON.stringify(DB_ALL));
   document.getElementById('sysUserModal')?.remove();
@@ -5946,10 +6013,13 @@ const MODS={
     ok:()=>true,
   },
   addMember:{title:'Convidar Membro',body:`
-    <div class="fg"><label class="fl">Email de Trabalho</label><input type="email" class="fc" placeholder="nome@empresa.com"></div>
-    <div class="fg"><label class="fl">Cargo</label><select class="fc"><option>Manager</option><option>Employee</option></select></div>
-    <p style="font-size:11.5px;color:var(--text2);margin-top:6px;">Um email de convite será enviado com link de acesso seguro.</p>`,
-    ok:()=>{toast('Convite enviado! 📧');}},
+    <div class="fg"><label class="fl">Nome Completo <span style="color:var(--red)">*</span></label><input id="suNome" class="fc" placeholder="Ex: Maria Souza"></div>
+    <div class="fg"><label class="fl">Email de Trabalho <span style="color:var(--red)">*</span></label><input id="suEmail" type="email" class="fc" placeholder="nome@empresa.com"></div>
+    <div class="grid g2"><div class="fg"><label class="fl">Cargo</label><select id="suRole" class="fc"><option value="manager">Manager</option><option value="employee" selected>Employee</option></select></div><div class="fg"><label class="fl">Senha <span style="color:var(--red)">*</span></label><input id="suSenha" type="password" class="fc" placeholder="Mínimo 8 caracteres + senha forte" oninput="updatePasswordStrengthDisplay('suSenha','addMemberSenhaStrength')"></div></div>
+    <div id="addMemberSenhaStrength" style="margin-top:-4px;margin-bottom:4px;font-size:11px;color:var(--text2);"></div>
+    <div class="fg"><label class="fl">Confirmar senha <span style="color:var(--red)">*</span></label><input id="suSenha2" type="password" class="fc" placeholder="Repita a senha"></div>
+    <p style="font-size:11.5px;color:var(--text2);margin-top:6px;">O membro será criado com login ativo nesta empresa, seguindo a mesma política de senha forte do restante do site.</p>`,
+    ok:addSystemUser},
   newProposal:{title:'+ Nova Proposta Comercial',body:()=>`
     <div class="fg"><label class="fl">Cliente</label><select id="proposalClient" class="fc">${DB.clients.map(c=>`<option>${c.name}</option>`).join('')}</select></div>
     <div class="fg"><label class="fl">Evento</label><input id="proposalEvent" class="fc" placeholder="Nome ou tipo do evento"></div>
@@ -6174,6 +6244,22 @@ async function doLogin(){
     const ok=await verifyPassword(pass,candidate.passwordHash||candidate.password||'');
     if(!ok){toast('Usuário ou senha inválidos.','err');return;}
 
+    if(candidate.mustResetPassword){
+      if(window.EventProSupabase){
+        const remoteLogin = await window.EventProSupabase.signInWithPassword(email,pass);
+        if(remoteLogin?.error)console.warn('Login Supabase no primeiro acesso falhou:',remoteLogin.error);
+      }
+      S.in=false;
+      S.page='login';
+      S.loginView='reset-password';
+      S.authRecovery.canReset=true;
+      S.authRecovery.localUserId=Number(candidate.id);
+      S.authRecovery.resetError='';
+      S.authRecovery.resetMessage='Primeiro acesso detectado. Defina uma nova senha para continuar.';
+      render();
+      return;
+    }
+
     if(window.EventProSupabase){
       const remoteLogin = await window.EventProSupabase.signInWithPassword(email,pass);
       if(remoteLogin?.error)console.warn('Login Supabase ignorado para preservar o fluxo local:',remoteLogin.error);
@@ -6217,9 +6303,8 @@ async function registerEmpresa(){
   if(!email||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){toast('Informe um email válido.','err');return;}
   if(companyContactEmail&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(companyContactEmail)){toast('Informe um e-mail comercial válido.','err');return;}
   if(companyCnpj&&!isValidCNPJ(companyCnpj)){toast('CNPJ inválido. Verifique e tente novamente.','err');return;}
-  if(senha.length<8){toast('A senha deve ter no mínimo 8 caracteres.','err');return;}
-  if(!isStrongPassword(senha)){const strength=getPasswordStrength(senha);toast('Senha fraca. Use maiúsculas, minúsculas, números e caracteres especiais. Força: '+strength.label,'err');return;}
-  if(senha!==senha2){toast('As senhas não conferem.','err');return;}
+  const passwordValidation=validatePasswordPolicy(senha,senha2);
+  if(!passwordValidation.ok){toast(passwordValidation.message,'err');return;}
   if(!lgpd){toast('Aceite os termos de uso de dados (LGPD) para continuar.','err');return;}
 
   if((DB_ALL?.users||[]).some(u=>String(u.email).toLowerCase()===email)){

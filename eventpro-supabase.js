@@ -24,6 +24,18 @@
     return supabaseClient;
   }
 
+  function getDetachedClient(storageKey){
+    if(!window.supabase||typeof window.supabase.createClient!=='function')return null;
+    return window.supabase.createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY,{
+      auth:{
+        persistSession:false,
+        autoRefreshToken:false,
+        detectSessionInUrl:false,
+        storageKey:storageKey||`eventpro-detached-${Date.now()}`,
+      },
+    });
+  }
+
   async function refreshSession(){
     const client = getClient();
     if(!client)return null;
@@ -49,6 +61,20 @@
 
   async function signUp(email,password,metadata){
     const client = getClient();
+    if(!client)return { data:null, error:new Error('Supabase indisponivel no navegador.') };
+    try{
+      return await client.auth.signUp({
+        email,
+        password,
+        options:{ data:metadata||{} },
+      });
+    }catch(error){
+      return { data:null, error };
+    }
+  }
+
+  async function createManagedUser(email,password,metadata){
+    const client = getDetachedClient(`eventpro-managed-${Date.now()}`);
     if(!client)return { data:null, error:new Error('Supabase indisponivel no navegador.') };
     try{
       return await client.auth.signUp({
@@ -166,6 +192,7 @@
     refreshSession,
     signInWithPassword,
     signUp,
+    createManagedUser,
     signOut,
     requestPasswordRecovery,
     updateUserPassword,

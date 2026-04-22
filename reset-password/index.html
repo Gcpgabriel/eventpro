@@ -110,7 +110,11 @@ button:disabled{opacity:.65;cursor:not-allowed;}
   function hasRecoveryHintInUrl(){
     const query = window.location.search || '';
     const hash = window.location.hash || '';
-    return /(^|[?&#])type=recovery([&#]|$)/i.test(query) || /(^|[?&#])type=recovery([&#]|$)/i.test(hash);
+    return /(^|[?&#])type=recovery([&#]|$)/i.test(query)
+      || /(^|[?&#])type=recovery([&#]|$)/i.test(hash)
+      || /(^|[?&#])code=([^&#]+)/i.test(query)
+      || /(^|[?&#])access_token=([^&#]+)/i.test(hash)
+      || /(^|[?&#])refresh_token=([^&#]+)/i.test(hash);
   }
 
   window.addEventListener('eventpro:supabase-auth',function(ev){
@@ -192,7 +196,10 @@ button:disabled{opacity:.65;cursor:not-allowed;}
 
     try{
       if(window.EventProSupabase && window.EventProSupabase.refreshSession){
-        await window.EventProSupabase.refreshSession();
+        const session = await window.EventProSupabase.refreshSession();
+        if(session){
+          state.canReset = true;
+        }
       }
     }catch(err){
       console.warn('Falha ao atualizar sessão para recovery:',err);
