@@ -6766,7 +6766,16 @@ async function registerEmpresa(){
     const remoteSignup = await window.EventProSupabase.signUp(email,senha,{ full_name:nomeAdmin, company_name:nomeEmpresa });
     if(remoteSignup?.error){
       console.error('Falha ao criar login no Supabase:',remoteSignup.error);
-      toast('Não foi possível criar o login no Supabase. Verifique Auth e tente novamente.','err');
+      const authMsg=String(remoteSignup.error?.message||'').trim();
+      const hint=authMsg?` Motivo: ${authMsg}`:'';
+      toast(`Não foi possível criar o login no Supabase.${hint}`,'err');
+      if(window.EventProSupabase.healthCheck){
+        const diag=await window.EventProSupabase.healthCheck();
+        if(!diag?.ok){
+          const diagMsg=String(diag?.error?.message||'').trim();
+          if(diagMsg)toast(`Diagnóstico Supabase: ${diagMsg}`,'warn');
+        }
+      }
       return;
     }
 
