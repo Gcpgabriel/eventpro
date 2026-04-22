@@ -6765,7 +6765,23 @@ async function registerEmpresa(){
 
   if(window.EventProSupabase){
     const remoteSignup = await window.EventProSupabase.signUp(email,senha,{ full_name:nomeAdmin, company_name:nomeEmpresa });
-    if(remoteSignup?.error)console.warn('Cadastro Supabase ignorado para preservar o fluxo local:',remoteSignup.error);
+    if(remoteSignup?.error){
+      console.error('Falha ao criar login no Supabase:',remoteSignup.error);
+      toast('Não foi possível criar o login no Supabase. Verifique Auth e tente novamente.','err');
+      return;
+    }
+
+    let cloudSession=await window.EventProSupabase.refreshSession();
+    if(!cloudSession&&window.EventProSupabase.signInWithPassword){
+      const remoteLogin=await window.EventProSupabase.signInWithPassword(email,senha);
+      if(remoteLogin?.error){
+        console.warn('Login Supabase após cadastro falhou:',remoteLogin.error);
+      }
+      cloudSession=await window.EventProSupabase.refreshSession();
+    }
+    if(!cloudSession){
+      toast('Conta criada, mas sem sessão ativa no Supabase. Verifique confirmação de e-mail no Auth.','warn');
+    }
   }
 
   const newEmpresaId=nextId(DB_ALL.companies||[{id:0}]);
@@ -6801,6 +6817,16 @@ async function registerEmpresa(){
   localStorage.setItem('eventpro_clists_all',JSON.stringify(CLISTS_ALL));
 
   applyTenantScope(newAdmin);
+  saveDB();
+
+  if(window.EventProSupabase?.pushSnapshot){
+    const seed=await window.EventProSupabase.pushSnapshot(newEmpresaId,DB_ALL,CLISTS_ALL);
+    if(seed?.error){
+      console.warn('Falha ao semear snapshot da nova empresa:',seed.error);
+      toast('Conta criada, mas o sync em nuvem falhou neste momento.','warn');
+    }
+  }
+
   S.in=true;
   S.page='dashboard';
   S.loginView='login';
