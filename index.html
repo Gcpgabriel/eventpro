@@ -2285,18 +2285,6 @@ function createContract(){
   return true;
 }
 
-function toISODate(d){
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-}
-
-function shiftISODate(iso,days){
-  if(!iso)return new Date().toISOString().slice(0,10);
-  const dt=new Date(`${iso}T12:00:00`);
-  if(Number.isNaN(dt.getTime()))return new Date().toISOString().slice(0,10);
-  dt.setDate(dt.getDate()+days);
-  return toISODate(dt);
-}
-
 function generateContractReceivables(contract,ev){
   if(!contract||!ev)return{created:0,total:0};
 
@@ -3411,18 +3399,6 @@ function getReservedQtyForDateRange(eqId,startDate,endDate){
   return Math.max(0,proposalReserved+eventReserved);
 }
 
-function getAvailableQtyForDate(eq,date){
-  const currentAvail=Math.max(0,Number(eq.avail||0));
-  const reserved=getReservedQtyForDate(eq.id,date);
-  return Math.max(0,currentAvail-reserved);
-}
-
-function getAvailableQtyForDateRange(eq,startDate,endDate){
-  const currentAvail=Math.max(0,Number(eq.avail||0));
-  const reserved=getReservedQtyForDateRange(eq.id,startDate,endDate);
-  return Math.max(0,currentAvail-reserved);
-}
-
 function getProposalPlannedQty(proposal,eqId){
   if(!proposal)return 0;
   if(Array.isArray(proposal.equipPlan)&&proposal.equipPlan.length){
@@ -4445,39 +4421,6 @@ function addEquip(){
     lastMaintenance:'',
   };
 
-  updateEquipAvailability(eq);
-  DB.equipment.push(eq);
-  syncRentalCostInFinance(eq);
-  toast('Equipamento criado com sucesso! 📦');
-  saveDB();
-  render();
-  return true;
-}
-
-function addEquipment(){
-  if(!requireRole(['admin','manager'],'Apenas admin/manager podem criar equipamentos.'))return false;
-  const name=document.getElementById('addEquipName')?.value.trim();
-  const brand=document.getElementById('addEquipBrand')?.value.trim();
-  const imei=document.getElementById('addEquipImei')?.value.trim();
-  const category=normalizeEquipmentCategory(document.getElementById('addEquipCategory')?.value,name);
-  const qty=Math.max(1,Number(document.getElementById('addEquipQty')?.value||1));
-  const status=document.getElementById('addEquipStatus')?.value||'disponível';
-
-  if(!name){toast('Informe o nome do equipamento.','err');return false;}
-  const eq={
-    id:nextId(DB.equipment),
-    name,
-    brand:brand||'-',
-    imei:imei||'-',
-    cat:category,
-    qty,
-    occupied:0,
-    avail:qty,
-    status,
-    temporary:false,
-    rentalCost:0,
-    empresa_id:Number(S.companyId||1),
-  };
   updateEquipAvailability(eq);
   DB.equipment.push(eq);
   syncRentalCostInFinance(eq);
