@@ -1646,6 +1646,12 @@ function userMenuAction(action){
 function openM(id){
   S.modal=id;
   render();
+  if(id==='newProposal')setTimeout(function(){
+    updateProposalAvailabilityPreview();
+    updateProposalSignalPreview();
+    toggleProposalExpensesFields();
+    proposalWizardGoToStep(1);
+  },0);
   if(id==='newContract')setTimeout(function(){
     toggleContractPaymentDetails();
     updateContractSignalPreview();
@@ -4083,6 +4089,71 @@ function toggleProposalConsQtyInput(consumableId){
   if(input)input.disabled=!checked;
 }
 
+function proposalWizardGoToStep(step){
+  const next=Math.max(1,Math.min(3,Number(step||1)));
+  [1,2,3].forEach((n)=>{
+    const panel=document.getElementById(`proposalStep${n}`);
+    const badge=document.getElementById(`proposalStepBadge${n}`);
+    if(panel)panel.style.display=n===next?'block':'none';
+    if(badge)badge.style.opacity=n===next?'1':'.45';
+  });
+  updateProposalWizardControls();
+}
+
+function getCurrentProposalWizardStep(){
+  return [1,2,3].find(n=>document.getElementById(`proposalStep${n}`)?.style.display!=='none')||1;
+}
+
+function updateProposalWizardControls(){
+  const step=getCurrentProposalWizardStep();
+  const backBtn=document.getElementById('proposalWizardBack');
+  const nextBtn=document.getElementById('proposalWizardNext');
+  const finishBtn=document.getElementById('proposalWizardFinish');
+  if(backBtn)backBtn.style.display=step>1?'inline-flex':'none';
+  if(nextBtn)nextBtn.style.display=step<3?'inline-flex':'none';
+  if(finishBtn)finishBtn.style.display=step===3?'inline-flex':'none';
+}
+
+function proposalExpensesEnabled(){
+  return !!document.getElementById('proposalEnableExpenses')?.checked;
+}
+
+function toggleProposalExpensesFields(){
+  const wrap=document.getElementById('proposalExpensesWrap');
+  if(!wrap)return;
+  wrap.style.display=proposalExpensesEnabled()?'grid':'none';
+}
+
+function updateProposalSignalPreview(){
+  const totalField=document.getElementById('proposalValue');
+  const signalPctField=document.getElementById('proposalSignalPct');
+  const signalValueField=document.getElementById('proposalSignalValue');
+  const finalField=document.getElementById('proposalFinalValue');
+  if(!totalField||!signalPctField||!signalValueField||!finalField)return;
+  const total=Math.max(0,Number(totalField.value||0));
+  const pct=Math.max(0,Math.min(100,Number(signalPctField.value||0)));
+  const signal=Math.round((total*(pct/100))*100)/100;
+  const final=Math.max(0,Math.round((total-signal)*100)/100);
+  signalValueField.value=signal.toFixed(2);
+  finalField.value=final.toFixed(2);
+}
+
+function collectProposalExpenseBreakdown(){
+  if(!proposalExpensesEnabled())return [];
+  const defs=[
+    {id:'Food',label:'Alimentação equipe'},
+    {id:'Hotel',label:'Hospedagem'},
+    {id:'Transport',label:'Transporte'},
+    {id:'Team',label:'Equipe'},
+    {id:'Other',label:'Outros (montagem)'},
+  ];
+  return defs.map((d)=>{
+    const value=Math.max(0,Number(document.getElementById(`proposalExpense${d.id}`)?.value||0));
+    const responsible=document.getElementById(`proposalExpense${d.id}Resp`)?.value||'empresa';
+    return {label:d.label,value,responsible};
+  }).filter(item=>item.value>0);
+}
+
 function addEventHandler(){
   if(!requireRole(['admin','manager'],'Apenas admin/manager podem criar eventos.'))return false;
   const name=document.getElementById('addEventName')?.value.trim();
@@ -4333,15 +4404,29 @@ function createProposal(){
   const date=document.getElementById('proposalDate')?.value;
   const endDate=document.getElementById('proposalEndDate')?.value||date;
   const time=document.getElementById('proposalTime')?.value||'19:00';
+  const endTime=document.getElementById('proposalEndTime')?.value||'23:00';
+  const venue=document.getElementById('proposalVenue')?.value.trim();
+  const notes=document.getElementById('proposalNotes')?.value.trim();
+  const serviceNotes=document.getElementById('proposalServiceNotes')?.value.trim();
   const validityDays=Number(document.getElementById('proposalValidityDays')?.value||7);
   const val=Number(document.getElementById('proposalValue')?.value||0);
+  const signalPct=Math.max(0,Math.min(100,Number(document.getElementById('proposalSignalPct')?.value||0)));
+  const signalDue=document.getElementById('proposalSignalDue')?.value||'';
+  const signalValue=Math.max(0,Number(document.getElementById('proposalSignalValue')?.value||0));
+  const finalValue=Math.max(0,Number(document.getElementById('proposalFinalValue')?.value||0));
+  const paymentMethodId=document.getElementById('proposalPaymentMethod')?.value||'';
   const checks=Array.from(document.querySelectorAll('#proposalEquipList input[data-eq-check="1"]:checked'));
   const consumableChecks=Array.from(document.querySelectorAll('#proposalEquipList input[data-cons-check="1"]:checked'));
   const equipIds=checks.map(c=>Number(c.value));
   const equipPlan=equipIds.map(eqId=>({
     eqId,
     qty:Math.max(1,Number(document.getElementById(`proposalQty-${eqId}`)?.value||1)),
+    unitValue:Math.max(0,Number(document.getElementById(`proposalUnitValue-${eqId}`)?.value||0)),
   }));
+  const equipmentPricing=equipPlan.reduce((acc,item)=>{
+    acc[item.eqId]=item.unitValue;
+    return acc;
+  },{});
   const consumablePlan=consumableChecks
     .map(c=>{
       const consumableId=Number(c.value);
@@ -4381,6 +4466,15 @@ function createProposal(){
   const serviceCategories=[...new Set([...(selectedCategories||[]),...inferredCategories])];
   const allowedValidity=[3,7,15,30];
   const normalizedValidity=allowedValidity.includes(validityDays)?validityDays:7;
+  const expenses=collectProposalExpenseBreakdown();
+  const paymentDraft={
+    totalValue:val,
+    signalPct,
+    signalValue,
+    signalDue,
+    finalValue,
+    paymentMethodId,
+  };
 
   if(!client||!event||!date||!endDate||val<=0){toast('Preencha cliente, evento, datas e valor.','err');return false;}
   if(equipIds.length===0&&consumablePlan.length===0){toast('Selecione ao menos um item (permanente ou consumível).','err');return false;}
@@ -4393,13 +4487,20 @@ function createProposal(){
     date,
     endDate,
     time,
+    endTime,
+    venue,
+    notes,
+    serviceNotes,
     validityDays:normalizedValidity,
     status:'pendente',
     items,
     serviceCategories,
     equipIds,
     equipPlan,
+    equipmentPricing,
     consumablePlan,
+    expenses,
+    paymentDraft,
     empresa_id:Number(S.companyId||1),
   });
 
@@ -4439,6 +4540,16 @@ function createProposalRevision(){
   const serviceCategories=selectedCategories.length?selectedCategories:deepClone(source.serviceCategories||[]);
   const allowedValidity=[3,7,15,30];
   const normalizedValidity=allowedValidity.includes(validityDays)?validityDays:7;
+  const sourcePaymentDraft=deepClone(source.paymentDraft||{});
+  const revisedSignalPct=Math.max(0,Math.min(100,Number(sourcePaymentDraft.signalPct||0)));
+  const revisedSignalValue=Math.round((val*(revisedSignalPct/100))*100)/100;
+  const revisedPaymentDraft={
+    ...sourcePaymentDraft,
+    totalValue:val,
+    signalPct:revisedSignalPct,
+    signalValue:revisedSignalValue,
+    finalValue:Math.max(0,Math.round((val-revisedSignalValue)*100)/100),
+  };
 
   const revisionRootId=Number(source.revisionRootId||source.revisionOf||source.id);
   const revisionNo=(DB.proposals||[])
@@ -4453,13 +4564,20 @@ function createProposalRevision(){
     date,
     endDate,
     time,
+    endTime:source.endTime||'23:00',
+    venue:source.venue||'',
+    notes:source.notes||'',
+    serviceNotes:source.serviceNotes||'',
     validityDays:normalizedValidity,
     status:'pendente',
     items:deepClone(source.items||[]),
     serviceCategories,
     equipIds:deepClone(source.equipIds||[]),
     equipPlan:deepClone(source.equipPlan||[]),
+    equipmentPricing:deepClone(source.equipmentPricing||{}),
     consumablePlan:deepClone(source.consumablePlan||[]),
+    expenses:deepClone(source.expenses||[]),
+    paymentDraft:revisedPaymentDraft,
     revisionRootId,
     revisionOf:Number(source.id),
     revisionNo,
@@ -4638,7 +4756,7 @@ function ensureEventForProposal(p){
     time:p.time||'19:00',
     endDate:p.endDate||p.date,
     endTime:p.endTime||'23:00',
-    venue:'A definir',
+    venue:p.venue||'A definir',
     status:'confirmado',
     value:Number(p.val||0),
     cat:'Corporativo',
@@ -4646,7 +4764,7 @@ function ensureEventForProposal(p){
     extraEquipPlan:[],
     consumables:eventConsumables,
     consumablesTotalCost,
-    notes:'Gerado automaticamente via orçamento aprovado',
+    notes:p.notes||'Gerado automaticamente via orçamento aprovado',
     proposalId:p.id,
   };
   DB.events.push(ev);
@@ -7047,27 +7165,59 @@ const MODS={
     <p style="font-size:11.5px;color:var(--text2);margin-top:6px;">O membro será criado com login ativo nesta empresa, seguindo a mesma política de senha forte do restante do site.</p>`,
     ok:addSystemUser},
   newProposal:{title:'+ Nova Proposta Comercial',body:()=>`
-    <div class="fg"><label class="fl">Cliente</label><select id="proposalClient" class="fc">${DB.clients.map(c=>`<option>${c.name}</option>`).join('')}</select></div>
-    <div class="fg"><label class="fl">Evento</label><input id="proposalEvent" class="fc" placeholder="Nome ou tipo do evento"></div>
-    <div class="grid g2"><div class="fg"><label class="fl">Data Inicial</label><input id="proposalDate" type="date" class="fc" onchange="updateProposalAvailabilityPreview()"></div><div class="fg"><label class="fl">Data Final</label><input id="proposalEndDate" type="date" class="fc" onchange="updateProposalAvailabilityPreview()"></div></div>
-    <div class="grid g3"><div class="fg"><label class="fl">Hora Inicial</label><input id="proposalTime" type="time" class="fc" value="19:00" onchange="updateProposalAvailabilityPreview()"></div><div class="fg"><label class="fl">Valor Total (R$)</label><input id="proposalValue" type="number" class="fc" placeholder="0"></div><div class="fg"><label class="fl">Tempo de validade do orçamento</label><select id="proposalValidityDays" class="fc"><option value="3">3 dias</option><option value="7" selected>7 dias</option><option value="15">15 dias</option><option value="30">30 dias</option></select></div></div>
-    <div class="fg"><label class="fl">Categorias de Serviços</label>
-      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px;">
-        ${['Som','Iluminação','Estrutura','Painel de LED','Gerador','Vídeo','DJ'].map(cat=>`<label style="display:flex;align-items:center;gap:5px;font-size:12.5px;cursor:pointer;"><input type="checkbox" name="proposalService" value="${cat}"> ${cat}</label>`).join('')}
-      </div>
+    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
+      <span id="proposalStepBadge1" class="badge b-blue">🟦 Passo 1 — Dados do Evento</span>
+      <span id="proposalStepBadge2" class="badge b-purple">Passo 2 — Serviços</span>
+      <span id="proposalStepBadge3" class="badge b-amber">Passo 3 — Despesas + Financeiro</span>
     </div>
-    <div class="fg"><label class="fl">Itens do Orçamento (permanentes, terceiros e consumíveis)</label><div id="proposalEquipList" style="display:flex;flex-direction:column;gap:6px;">
-      <div style="font-size:11px;color:var(--text3);font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin:2px 0 4px;">Permanentes</div>
-      ${DB.equipment.filter(e=>!e.temporary).map(eq=>{const meta=formatEquipmentIdentity(eq);return `<label style="display:flex;align-items:center;gap:8px;font-size:12.5px;cursor:pointer;"><input id="proposalEq-${eq.id}" data-eq-check="1" type="checkbox" value="${eq.id}" onchange="toggleProposalQtyInput(${eq.id})"><span style="flex:1;min-width:0;"><div style="font-weight:500;">${eq.name}</div><div style="font-size:10.5px;color:var(--text2);">${meta.label}</div></span><span style="margin-left:auto;display:flex;align-items:center;gap:6px;">Qtd.<input id="proposalQty-${eq.id}" type="number" min="1" step="1" value="1" class="fc" style="width:72px;padding:4px 6px;font-size:11.5px;" disabled onchange="updateProposalAvailabilityPreview()"></span></label>`;}).join('')}
-      <div style="height:1px;background:var(--border);margin:4px 0;"></div>
-      <div style="font-size:11px;color:var(--text3);font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin:2px 0 4px;">Terceiros (Aluguel)</div>
-      ${DB.equipment.filter(e=>e.temporary).map(eq=>{const meta=formatEquipmentIdentity(eq);const rentalCost=Math.max(0,Number(eq.rentalCost||0));return `<label style="display:flex;align-items:center;gap:8px;font-size:12.5px;cursor:pointer;"><input id="proposalEq-${eq.id}" data-eq-check="1" type="checkbox" value="${eq.id}" onchange="toggleProposalQtyInput(${eq.id})"><span style="flex:1;min-width:0;"><div style="font-weight:500;">${eq.name} <span class="badge b-purple" style="font-size:9px;vertical-align:middle;">Terceiro</span></div><div style="font-size:10.5px;color:var(--text2);">${meta.label} · Aluguel: <strong style="color:var(--red)">${fmtVal(rentalCost)}/evento</strong></div></span><span style="margin-left:auto;display:flex;align-items:center;gap:6px;">Qtd.<input id="proposalQty-${eq.id}" type="number" min="1" step="1" value="1" class="fc" style="width:72px;padding:4px 6px;font-size:11.5px;" disabled onchange="updateProposalAvailabilityPreview()"></span></label>`;}).join('')||'<div style="font-size:11.5px;color:var(--text2);">Nenhum equipamento de terceiros cadastrado.</div>'}
-      <div style="height:1px;background:var(--border);margin:4px 0;"></div>
-      <div style="font-size:11px;color:var(--text3);font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin:2px 0 4px;">Consumíveis (opcional)</div>
-      ${DB.consumables.map(item=>`<label style="display:flex;align-items:center;gap:8px;font-size:12.5px;cursor:pointer;"><input id="proposalCons-${item.id}" data-cons-check="1" type="checkbox" value="${item.id}" onchange="toggleProposalConsQtyInput(${item.id})"><span style="flex:1;min-width:0;"><div style="font-weight:500;">${esc(item.name)}</div><div style="font-size:10.5px;color:var(--text2);">${Math.max(0,Number(item.qtyStock||0))} ${esc(item.unit||'unidade')} em estoque</div></span><span style="margin-left:auto;display:flex;align-items:center;gap:6px;">Qtd.<input id="proposalConsQty-${item.id}" type="number" min="1" step="1" value="1" class="fc" style="width:72px;padding:4px 6px;font-size:11.5px;" disabled></span></label>`).join('')}
-    </div></div>
-    <div class="fg"><label class="fl">Disponibilidade na data</label><div id="proposalAvailPreview" style="max-height:180px;overflow:auto;background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);padding:8px;"></div></div>
-    <div class="fg"><label class="fl">Observações</label><textarea class="fc" placeholder="Condições, formas de pagamento..."></textarea></div>`,
+
+    <div id="proposalStep1">
+      <div class="fg"><label class="fl">Cliente</label><select id="proposalClient" class="fc">${DB.clients.map(c=>`<option>${c.name}</option>`).join('')}</select></div>
+      <div class="fg"><label class="fl">Evento</label><input id="proposalEvent" class="fc" placeholder="Nome ou tipo do evento"></div>
+      <div class="grid g2"><div class="fg"><label class="fl">Data Inicial</label><input id="proposalDate" type="date" class="fc" onchange="updateProposalAvailabilityPreview()"></div><div class="fg"><label class="fl">Data Final</label><input id="proposalEndDate" type="date" class="fc" onchange="updateProposalAvailabilityPreview()"></div></div>
+      <div class="grid g2"><div class="fg"><label class="fl">Hora Inicial</label><input id="proposalTime" type="time" class="fc" value="19:00" onchange="updateProposalAvailabilityPreview()"></div><div class="fg"><label class="fl">Hora Final</label><input id="proposalEndTime" type="time" class="fc" value="23:00"></div></div>
+      <div class="grid g2"><div class="fg"><label class="fl">Local</label><input id="proposalVenue" class="fc" placeholder="Local do evento"></div><div class="fg"><label class="fl">Tempo de validade do orçamento</label><select id="proposalValidityDays" class="fc"><option value="3">3 dias</option><option value="7" selected>7 dias</option><option value="15">15 dias</option><option value="30">30 dias</option></select></div></div>
+      <div class="fg"><label class="fl">Observações</label><textarea id="proposalNotes" class="fc" placeholder="Contexto do evento, restrições do local, observações gerais..."></textarea></div>
+    </div>
+
+    <div id="proposalStep2" style="display:none;">
+      <div class="fg"><label class="fl">Categorias de Serviços</label>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px;">
+          ${['Som','Iluminação','Estrutura','Painel de LED','Gerador','Vídeo','DJ'].map(cat=>`<label style="display:flex;align-items:center;gap:5px;font-size:12.5px;cursor:pointer;"><input type="checkbox" name="proposalService" value="${cat}"> ${cat}</label>`).join('')}
+        </div>
+      </div>
+      <div class="fg"><label class="fl">Itens do Orçamento (permanentes, terceiros e consumíveis)</label><div id="proposalEquipList" style="display:flex;flex-direction:column;gap:6px;">
+        <div style="font-size:11px;color:var(--text3);font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin:2px 0 4px;">Permanentes</div>
+        ${DB.equipment.filter(e=>!e.temporary).map(eq=>{const meta=formatEquipmentIdentity(eq);return `<label style="display:flex;align-items:flex-start;gap:8px;font-size:12.5px;cursor:pointer;"><input id="proposalEq-${eq.id}" data-eq-check="1" type="checkbox" value="${eq.id}" onchange="toggleProposalQtyInput(${eq.id})"><span style="flex:1;min-width:0;"><div style="font-weight:500;">${eq.name}</div><div style="font-size:10.5px;color:var(--text2);">${meta.label}</div></span><span style="margin-left:auto;display:grid;grid-template-columns:auto auto;gap:6px;align-items:center;">Qtd.<input id="proposalQty-${eq.id}" type="number" min="1" step="1" value="1" class="fc" style="width:72px;padding:4px 6px;font-size:11.5px;" disabled onchange="updateProposalAvailabilityPreview()">Valor<input id="proposalUnitValue-${eq.id}" type="number" min="0" step="0.01" value="0" class="fc" style="width:92px;padding:4px 6px;font-size:11.5px;"></span></label>`;}).join('')}
+        <div style="height:1px;background:var(--border);margin:4px 0;"></div>
+        <div style="font-size:11px;color:var(--text3);font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin:2px 0 4px;">Terceiros (Aluguel)</div>
+        ${DB.equipment.filter(e=>e.temporary).map(eq=>{const meta=formatEquipmentIdentity(eq);const rentalCost=Math.max(0,Number(eq.rentalCost||0));return `<label style="display:flex;align-items:flex-start;gap:8px;font-size:12.5px;cursor:pointer;"><input id="proposalEq-${eq.id}" data-eq-check="1" type="checkbox" value="${eq.id}" onchange="toggleProposalQtyInput(${eq.id})"><span style="flex:1;min-width:0;"><div style="font-weight:500;">${eq.name} <span class="badge b-purple" style="font-size:9px;vertical-align:middle;">Terceiro</span></div><div style="font-size:10.5px;color:var(--text2);">${meta.label} · Aluguel: <strong style="color:var(--red)">${fmtVal(rentalCost)}/evento</strong></div></span><span style="margin-left:auto;display:grid;grid-template-columns:auto auto;gap:6px;align-items:center;">Qtd.<input id="proposalQty-${eq.id}" type="number" min="1" step="1" value="1" class="fc" style="width:72px;padding:4px 6px;font-size:11.5px;" disabled onchange="updateProposalAvailabilityPreview()">Valor<input id="proposalUnitValue-${eq.id}" type="number" min="0" step="0.01" value="${rentalCost.toFixed(2)}" class="fc" style="width:92px;padding:4px 6px;font-size:11.5px;"></span></label>`;}).join('')||'<div style="font-size:11.5px;color:var(--text2);">Nenhum equipamento de terceiros cadastrado.</div>'}
+        <div style="height:1px;background:var(--border);margin:4px 0;"></div>
+        <div style="font-size:11px;color:var(--text3);font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin:2px 0 4px;">Consumíveis (opcional)</div>
+        ${DB.consumables.map(item=>`<label style="display:flex;align-items:center;gap:8px;font-size:12.5px;cursor:pointer;"><input id="proposalCons-${item.id}" data-cons-check="1" type="checkbox" value="${item.id}" onchange="toggleProposalConsQtyInput(${item.id})"><span style="flex:1;min-width:0;"><div style="font-weight:500;">${esc(item.name)}</div><div style="font-size:10.5px;color:var(--text2);">${Math.max(0,Number(item.qtyStock||0))} ${esc(item.unit||'unidade')} em estoque</div></span><span style="margin-left:auto;display:flex;align-items:center;gap:6px;">Qtd.<input id="proposalConsQty-${item.id}" type="number" min="1" step="1" value="1" class="fc" style="width:72px;padding:4px 6px;font-size:11.5px;" disabled></span></label>`).join('')}
+      </div></div>
+      <div class="fg"><label class="fl">Disponibilidade na data</label><div id="proposalAvailPreview" style="max-height:180px;overflow:auto;background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);padding:8px;"></div></div>
+      <div class="fg"><label class="fl">Observações dos serviços</label><textarea id="proposalServiceNotes" class="fc" placeholder="Escopo técnico, detalhes da operação, observações dos equipamentos..."></textarea></div>
+    </div>
+
+    <div id="proposalStep3" style="display:none;">
+      <div class="card" style="margin-bottom:10px;"><div class="card-header"><span class="card-title">Despesas</span></div><div class="card-body" style="padding-top:8px;display:grid;gap:8px;">
+        <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;cursor:pointer;"><input id="proposalEnableExpenses" type="checkbox" onchange="toggleProposalExpensesFields()"> Incluir despesas previstas neste orçamento</label>
+        <div id="proposalExpensesWrap" style="display:none;gap:8px;">
+          <div class="grid g3"><div class="fg"><label class="fl">Alimentação equipe</label><input id="proposalExpenseFood" type="number" min="0" step="0.01" class="fc" placeholder="0"></div><div class="fg"><label class="fl">Responsável</label><select id="proposalExpenseFoodResp" class="fc"><option value="empresa">empresa</option><option value="contratante">contratante</option><option value="reembolso">reembolso</option></select></div></div>
+          <div class="grid g3"><div class="fg"><label class="fl">Hospedagem</label><input id="proposalExpenseHotel" type="number" min="0" step="0.01" class="fc" placeholder="0"></div><div class="fg"><label class="fl">Responsável</label><select id="proposalExpenseHotelResp" class="fc"><option value="empresa">empresa</option><option value="contratante">contratante</option><option value="reembolso">reembolso</option></select></div></div>
+          <div class="grid g3"><div class="fg"><label class="fl">Transporte</label><input id="proposalExpenseTransport" type="number" min="0" step="0.01" class="fc" placeholder="0"></div><div class="fg"><label class="fl">Responsável</label><select id="proposalExpenseTransportResp" class="fc"><option value="empresa">empresa</option><option value="contratante">contratante</option><option value="reembolso">reembolso</option></select></div></div>
+          <div class="grid g3"><div class="fg"><label class="fl">Equipe</label><input id="proposalExpenseTeam" type="number" min="0" step="0.01" class="fc" placeholder="0"></div><div class="fg"><label class="fl">Responsável</label><select id="proposalExpenseTeamResp" class="fc"><option value="empresa">empresa</option><option value="contratante">contratante</option><option value="reembolso">reembolso</option></select></div></div>
+          <div class="grid g3"><div class="fg"><label class="fl">Outros (montagem)</label><input id="proposalExpenseOther" type="number" min="0" step="0.01" class="fc" placeholder="0"></div><div class="fg"><label class="fl">Responsável</label><select id="proposalExpenseOtherResp" class="fc"><option value="empresa">empresa</option><option value="contratante">contratante</option><option value="reembolso">reembolso</option></select></div></div>
+        </div>
+      </div></div>
+
+      <div class="card"><div class="card-header"><span class="card-title">Financeiro</span></div><div class="card-body" style="padding-top:8px;display:grid;gap:8px;">
+        <div class="grid g2"><div class="fg"><label class="fl">Valor total</label><input id="proposalValue" type="number" min="0" step="0.01" class="fc" placeholder="0" oninput="updateProposalSignalPreview()"></div><div class="fg"><label class="fl">Forma de pagamento preferida</label><select id="proposalPaymentMethod" class="fc">${DB.paymentMethods.map(pm=>`<option value="${pm.id}">${esc(pm.name)}</option>`).join('')}</select></div></div>
+        <div class="grid g3"><div class="fg"><label class="fl">Sinal (%)</label><input id="proposalSignalPct" type="number" min="0" max="100" step="1" class="fc" value="0" oninput="updateProposalSignalPreview()"></div><div class="fg"><label class="fl">Data sinal</label><input id="proposalSignalDue" type="date" class="fc" value="${new Date().toISOString().slice(0,10)}"></div><div class="fg"><label class="fl">Valor do sinal (R$)</label><input id="proposalSignalValue" type="number" class="fc" readonly></div></div>
+        <div class="grid g2"><div class="fg"><label class="fl">Parcela final (R$)</label><input id="proposalFinalValue" type="number" class="fc" readonly></div><div class="fg"><label class="fl">Resumo</label><input class="fc" value="Esses dados serão usados para pré-preencher o contrato" readonly></div></div>
+      </div></div>
+    </div>`,
     ok:createProposal},
   reviseProposal:{title:'Revisar Orçamento (nova versão)',body:()=>{
     const source=DB.proposals.find(p=>Number(p.id)===Number(S.editProposalId||0)&&!p.deletedAt);
@@ -7096,6 +7246,17 @@ const MODS={
     const cl=ev?DB.clients.find(c=>c.name===ev.client):null;
     const linkedProposal=ev?findProposalForEvent(ev):null;
     const preSelectedServices=new Set(Array.isArray(linkedProposal?.serviceCategories)?linkedProposal.serviceCategories:[]);
+    const proposalNotes=[linkedProposal?.notes,linkedProposal?.serviceNotes].filter(Boolean).join('\n\n');
+    const proposalPaymentDraft=linkedProposal?.paymentDraft||{};
+    const proposalExpenseMap=(Array.isArray(linkedProposal?.expenses)?linkedProposal.expenses:[]).reduce((acc,item)=>{
+      const key=String(item.label||'').toLowerCase();
+      if(key.includes('aliment'))acc.Food=item;
+      if(key.includes('hosped'))acc.Hotel=item;
+      if(key.includes('transport'))acc.Transport=item;
+      if(key==='equipe')acc.Team=item;
+      if(key.includes('outros'))acc.Other=item;
+      return acc;
+    },{});
     const eventOpts=DB.events.filter(e=>e.status==='confirmado').map(e=>`<option value="${e.id}" ${eid===e.id?'selected':''}>${e.name}</option>`).join('');
     const cats=['Som','Iluminação','Estrutura','Painel de LED','Gerador','Vídeo','DJ'];
     const eventPlan=ev?getEventLoadPlan(ev.id):[];
@@ -7103,7 +7264,8 @@ const MODS={
       const eq=DB.equipment.find(item=>Number(item.id)===Number(row.eqId));
       if(!eq)return '';
       const qty=Math.max(1,Number(row.qty||1));
-      const unitDefault=eq.temporary?Math.max(0,Number(eq.rentalCost||0)):0;
+      const proposalUnitValue=Math.max(0,Number(linkedProposal?.equipmentPricing?.[eq.id]||0));
+      const unitDefault=proposalUnitValue||(eq.temporary?Math.max(0,Number(eq.rentalCost||0)):0);
       return `<tr><td>${esc(eq.name)}</td><td>${qty}</td><td><input type="number" min="0" step="0.01" class="fc" style="width:120px;padding:5px 8px;font-size:11.5px;" data-contract-eq-id="${eq.id}" data-contract-eq-qty="${qty}" id="contractEqUnitValue-${eq.id}" value="${unitDefault.toFixed(2)}"></td></tr>`;
     }).join('');
     
@@ -7122,15 +7284,15 @@ const MODS={
       </div>
       <div class="grid g2">
         <div class="fg"><label class="fl">Data</label><input id="contractEventDate" type="date" class="fc" value="${esc(ev?.date||'')}"></div>
-        <div class="fg"><label class="fl">Local</label><input id="contractEventVenue" class="fc" value="${esc(ev?.venue||'')}"></div>
+        <div class="fg"><label class="fl">Local</label><input id="contractEventVenue" class="fc" value="${esc(ev?.venue||linkedProposal?.venue||'')}"></div>
       </div>
       <div class="grid g2">
         <div class="fg"><label class="fl">Horário início</label><input id="contractEventTime" type="time" class="fc" value="${esc(ev?.time||'19:00')}"></div>
-        <div class="fg"><label class="fl">Horário fim</label><input id="contractEventEndTime" type="time" class="fc" value="${esc(ev?.endTime||'23:00')}"></div>
+        <div class="fg"><label class="fl">Horário fim</label><input id="contractEventEndTime" type="time" class="fc" value="${esc(ev?.endTime||linkedProposal?.endTime||'23:00')}"></div>
       </div>
       ${cl?`<div class="fg"><label class="fl">Dados do Cliente</label><div style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);padding:8px;font-size:10.5px;"><strong>${cl.name}</strong> (${cl.type})<br>${cl.type==='PJ'?`CNPJ: ${cl.doc}`:`CPF: ${cl.doc}`}<br>Email: ${cl.email}<br>Endereço: ${cl.address||'—'}</div></div>`:''}
       <div class="fg"><label class="fl">Endereço do Contratante</label><input id="contractClientAddr" class="fc" placeholder="Endereço do cliente" value="${esc(cl?.address||'')}"></div>
-      <div class="fg"><label class="fl">Observações</label><textarea id="contractNotes" class="fc" placeholder="Observações do evento e do contrato..."></textarea></div>
+      <div class="fg"><label class="fl">Observações</label><textarea id="contractNotes" class="fc" placeholder="Observações do evento e do contrato...">${esc(proposalNotes)}</textarea></div>
       <div style="display:flex;justify-content:flex-end;"><button type="button" class="btn btn-primary" onclick="contractWizardNextStep()">Continuar →</button></div>
     </div>
 
@@ -7144,25 +7306,25 @@ const MODS={
       <div class="fg"><label class="fl">Equipamentos e valor por equipamento</label>
         <div class="tw"><table><tr><th>Equipamento</th><th>Qtd.</th><th>Valor unitário (R$)</th></tr>${equipmentRows||'<tr><td colspan="3" style="color:var(--text2);">Nenhum equipamento vinculado ao evento.</td></tr>'}</table></div>
       </div>
-      <div class="fg"><label class="fl">Observações dos serviços</label><textarea id="contractServiceNotes" class="fc" placeholder="Detalhes sobre serviços e equipamentos..."></textarea></div>
+      <div class="fg"><label class="fl">Observações dos serviços</label><textarea id="contractServiceNotes" class="fc" placeholder="Detalhes sobre serviços e equipamentos...">${esc(linkedProposal?.serviceNotes||'')}</textarea></div>
     </div>
 
     <div id="contractStep3" style="display:none;">
       <div class="card" style="margin-bottom:10px;"><div class="card-header"><span class="card-title">Despesas</span></div><div class="card-body" style="padding-top:8px;display:grid;gap:8px;">
-        <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;cursor:pointer;"><input id="contractEnableExpenses" type="checkbox" onchange="toggleContractExpensesFields()"> Incluir despesas no contrato (opcional)</label>
-        <div id="contractExpensesWrap" style="display:none;gap:8px;">
-        <div class="grid g3"><div class="fg"><label class="fl">Alimentação equipe</label><input id="contractExpenseFood" type="number" min="0" step="0.01" class="fc" placeholder="0"></div><div class="fg"><label class="fl">Responsável</label><select id="contractExpenseFoodResp" class="fc"><option value="empresa">empresa</option><option value="contratante">contratante</option><option value="reembolso">reembolso</option></select></div></div>
-        <div class="grid g3"><div class="fg"><label class="fl">Hospedagem</label><input id="contractExpenseHotel" type="number" min="0" step="0.01" class="fc" placeholder="0"></div><div class="fg"><label class="fl">Responsável</label><select id="contractExpenseHotelResp" class="fc"><option value="empresa">empresa</option><option value="contratante">contratante</option><option value="reembolso">reembolso</option></select></div></div>
-        <div class="grid g3"><div class="fg"><label class="fl">Transporte</label><input id="contractExpenseTransport" type="number" min="0" step="0.01" class="fc" placeholder="0"></div><div class="fg"><label class="fl">Responsável</label><select id="contractExpenseTransportResp" class="fc"><option value="empresa">empresa</option><option value="contratante">contratante</option><option value="reembolso">reembolso</option></select></div></div>
-        <div class="grid g3"><div class="fg"><label class="fl">Equipe</label><input id="contractExpenseTeam" type="number" min="0" step="0.01" class="fc" placeholder="0"></div><div class="fg"><label class="fl">Responsável</label><select id="contractExpenseTeamResp" class="fc"><option value="empresa">empresa</option><option value="contratante">contratante</option><option value="reembolso">reembolso</option></select></div></div>
-        <div class="grid g3"><div class="fg"><label class="fl">Outros (montagem)</label><input id="contractExpenseOther" type="number" min="0" step="0.01" class="fc" placeholder="0"></div><div class="fg"><label class="fl">Responsável</label><select id="contractExpenseOtherResp" class="fc"><option value="empresa">empresa</option><option value="contratante">contratante</option><option value="reembolso">reembolso</option></select></div></div>
+        <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;cursor:pointer;"><input id="contractEnableExpenses" type="checkbox" ${Array.isArray(linkedProposal?.expenses)&&linkedProposal.expenses.length?'checked':''} onchange="toggleContractExpensesFields()"> Incluir despesas no contrato (opcional)</label>
+        <div id="contractExpensesWrap" style="display:${Array.isArray(linkedProposal?.expenses)&&linkedProposal.expenses.length?'grid':'none'};gap:8px;">
+        <div class="grid g3"><div class="fg"><label class="fl">Alimentação equipe</label><input id="contractExpenseFood" type="number" min="0" step="0.01" class="fc" placeholder="0" value="${Number(proposalExpenseMap.Food?.value||0)}"></div><div class="fg"><label class="fl">Responsável</label><select id="contractExpenseFoodResp" class="fc"><option value="empresa" ${String(proposalExpenseMap.Food?.responsible||'empresa')==='empresa'?'selected':''}>empresa</option><option value="contratante" ${String(proposalExpenseMap.Food?.responsible||'')==='contratante'?'selected':''}>contratante</option><option value="reembolso" ${String(proposalExpenseMap.Food?.responsible||'')==='reembolso'?'selected':''}>reembolso</option></select></div></div>
+        <div class="grid g3"><div class="fg"><label class="fl">Hospedagem</label><input id="contractExpenseHotel" type="number" min="0" step="0.01" class="fc" placeholder="0" value="${Number(proposalExpenseMap.Hotel?.value||0)}"></div><div class="fg"><label class="fl">Responsável</label><select id="contractExpenseHotelResp" class="fc"><option value="empresa" ${String(proposalExpenseMap.Hotel?.responsible||'empresa')==='empresa'?'selected':''}>empresa</option><option value="contratante" ${String(proposalExpenseMap.Hotel?.responsible||'')==='contratante'?'selected':''}>contratante</option><option value="reembolso" ${String(proposalExpenseMap.Hotel?.responsible||'')==='reembolso'?'selected':''}>reembolso</option></select></div></div>
+        <div class="grid g3"><div class="fg"><label class="fl">Transporte</label><input id="contractExpenseTransport" type="number" min="0" step="0.01" class="fc" placeholder="0" value="${Number(proposalExpenseMap.Transport?.value||0)}"></div><div class="fg"><label class="fl">Responsável</label><select id="contractExpenseTransportResp" class="fc"><option value="empresa" ${String(proposalExpenseMap.Transport?.responsible||'empresa')==='empresa'?'selected':''}>empresa</option><option value="contratante" ${String(proposalExpenseMap.Transport?.responsible||'')==='contratante'?'selected':''}>contratante</option><option value="reembolso" ${String(proposalExpenseMap.Transport?.responsible||'')==='reembolso'?'selected':''}>reembolso</option></select></div></div>
+        <div class="grid g3"><div class="fg"><label class="fl">Equipe</label><input id="contractExpenseTeam" type="number" min="0" step="0.01" class="fc" placeholder="0" value="${Number(proposalExpenseMap.Team?.value||0)}"></div><div class="fg"><label class="fl">Responsável</label><select id="contractExpenseTeamResp" class="fc"><option value="empresa" ${String(proposalExpenseMap.Team?.responsible||'empresa')==='empresa'?'selected':''}>empresa</option><option value="contratante" ${String(proposalExpenseMap.Team?.responsible||'')==='contratante'?'selected':''}>contratante</option><option value="reembolso" ${String(proposalExpenseMap.Team?.responsible||'')==='reembolso'?'selected':''}>reembolso</option></select></div></div>
+        <div class="grid g3"><div class="fg"><label class="fl">Outros (montagem)</label><input id="contractExpenseOther" type="number" min="0" step="0.01" class="fc" placeholder="0" value="${Number(proposalExpenseMap.Other?.value||0)}"></div><div class="fg"><label class="fl">Responsável</label><select id="contractExpenseOtherResp" class="fc"><option value="empresa" ${String(proposalExpenseMap.Other?.responsible||'empresa')==='empresa'?'selected':''}>empresa</option><option value="contratante" ${String(proposalExpenseMap.Other?.responsible||'')==='contratante'?'selected':''}>contratante</option><option value="reembolso" ${String(proposalExpenseMap.Other?.responsible||'')==='reembolso'?'selected':''}>reembolso</option></select></div></div>
         </div>
       </div></div>
 
       <div class="card"><div class="card-header"><span class="card-title">Pagamento</span></div><div class="card-body" style="padding-top:8px;display:grid;gap:8px;">
-        <div class="grid g2"><div class="fg"><label class="fl">Valor total</label><input id="contractTotalValue" type="number" min="0" step="0.01" class="fc" value="${Number(ev?.value||0)}" oninput="updateContractSignalPreview()"></div><div class="fg"><label class="fl">Duração do Evento (horas)</label><input id="contractDuration" type="number" class="fc" value="${ev?'6':''}"></div></div>
-        <div class="grid g3"><div class="fg"><label class="fl">Sinal (%)</label><input id="contractSignalPct" type="number" min="0" max="100" step="1" class="fc" value="0" oninput="updateContractSignalPreview()"></div><div class="fg"><label class="fl">Data sinal</label><input id="contractSignalDue" type="date" class="fc" value="${new Date().toISOString().slice(0,10)}"></div><div class="fg"><label class="fl">Valor do sinal (R$)</label><input id="contractSignalValue" type="number" class="fc" readonly></div></div>
-        <div class="grid g2"><div class="fg"><label class="fl">Parcela final (R$)</label><input id="contractFinalValue" type="number" class="fc" readonly></div><div class="fg"><label class="fl">Forma de pagamento</label><select id="contractPayment" class="fc" onchange="toggleContractPaymentDetails()">${DB.paymentMethods.map(pm=>`<option value="${pm.id}">${esc(pm.name)}</option>`).join('')}</select></div></div>
+        <div class="grid g2"><div class="fg"><label class="fl">Valor total</label><input id="contractTotalValue" type="number" min="0" step="0.01" class="fc" value="${Number(proposalPaymentDraft.totalValue||ev?.value||0)}" oninput="updateContractSignalPreview()"></div><div class="fg"><label class="fl">Duração do Evento (horas)</label><input id="contractDuration" type="number" class="fc" value="${ev?'6':''}"></div></div>
+        <div class="grid g3"><div class="fg"><label class="fl">Sinal (%)</label><input id="contractSignalPct" type="number" min="0" max="100" step="1" class="fc" value="${Number(proposalPaymentDraft.signalPct||0)}" oninput="updateContractSignalPreview()"></div><div class="fg"><label class="fl">Data sinal</label><input id="contractSignalDue" type="date" class="fc" value="${esc(proposalPaymentDraft.signalDue||new Date().toISOString().slice(0,10))}"></div><div class="fg"><label class="fl">Valor do sinal (R$)</label><input id="contractSignalValue" type="number" class="fc" readonly></div></div>
+        <div class="grid g2"><div class="fg"><label class="fl">Parcela final (R$)</label><input id="contractFinalValue" type="number" class="fc" readonly></div><div class="fg"><label class="fl">Forma de pagamento</label><select id="contractPayment" class="fc" onchange="toggleContractPaymentDetails()">${DB.paymentMethods.map(pm=>`<option value="${pm.id}" ${String(pm.id)===String(proposalPaymentDraft.paymentMethodId||'')?'selected':''}>${esc(pm.name)}</option>`).join('')}</select></div></div>
         <div id="contractPixSplitWrap" style="display:none;background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);padding:10px;margin-bottom:10px;">
           <div style="font-size:12px;font-weight:700;margin-bottom:8px;">PIX (Entrada + Restante)</div>
           <div class="grid g2">
@@ -7275,10 +7437,12 @@ function renderModal(){
   const locked=S.modal==='companyOnboarding'&&shouldForceCompanyOnboarding();
   const onboardingStep=Number(S.companyOnboarding?.step||1);
   const onboardingFooter=locked?`${onboardingStep>1?`<button class="btn btn-ghost" onclick="goCompanyOnboardingStep(${onboardingStep-1})">Voltar</button>`:'<span style="font-size:11px;color:var(--text3);">Etapa ${onboardingStep} de 3</span>'}<button class="btn btn-primary" onclick="${onboardingStep<3?`goCompanyOnboardingStep(${onboardingStep+1})`:`if(MODS['companyOnboarding'].ok()!==false)closeM()`}">${onboardingStep<3?'Continuar':'Concluir'}</button>`:'';
+  const proposalWizardFooter=S.modal==='newProposal'
+    ?`<button class="btn btn-ghost" onclick="closeM()">Cancelar</button><button id="proposalWizardBack" class="btn btn-ghost" onclick="proposalWizardGoToStep(getCurrentProposalWizardStep()-1)" style="display:none;">Voltar</button><button id="proposalWizardNext" class="btn btn-primary" onclick="proposalWizardGoToStep(getCurrentProposalWizardStep()+1)">Avançar</button><button id="proposalWizardFinish" class="btn btn-primary" onclick="if(MODS['newProposal'].ok()!==false)closeM()" style="display:none;">Finalizar</button>`
+    :'';
   const contractWizardFooter=S.modal==='newContract'
     ?`<button class="btn btn-ghost" onclick="closeM()">Cancelar</button><button id="contractWizardBack" class="btn btn-ghost" onclick="contractWizardPrevStep()" style="display:none;">Voltar</button><button id="contractWizardNext" class="btn btn-primary" onclick="contractWizardNextStep()">Avançar</button><button id="contractWizardFinish" class="btn btn-primary" onclick="if(MODS['newContract'].ok()!==false)closeM()" style="display:none;">Finalizar</button>`
     :'';
-  if(S.modal==='newProposal')setTimeout(updateProposalAvailabilityPreview,0);
   if(S.modal==='addClient')setTimeout(onClientTypeChange,0);
   if(S.modal==='editClient')setTimeout(onEditClientTypeChange,0);
   if(S.modal==='addTask')setTimeout(onAddTaskTypeChange,0);
@@ -7286,7 +7450,7 @@ function renderModal(){
   <div class="modal">
     <div class="modal-hd"><span class="modal-title">${title}</span>${locked?'':`<button class="btn btn-ghost btn-icon" onclick="closeM()" style="font-size:19px;border:none;line-height:1;">×</button>`}</div>
     <div class="modal-bd">${body}</div>
-    <div class="modal-ft">${locked?onboardingFooter:(S.modal==='newContract'?contractWizardFooter:`<button class="btn btn-ghost" onclick="closeM()">Cancelar</button><button class="btn btn-primary" onclick="if(MODS['${S.modal}'].ok()!==false)closeM()">Salvar</button>`)}</div>
+    <div class="modal-ft">${locked?onboardingFooter:(S.modal==='newContract'?contractWizardFooter:(S.modal==='newProposal'?proposalWizardFooter:`<button class="btn btn-ghost" onclick="closeM()">Cancelar</button><button class="btn btn-primary" onclick="if(MODS['${S.modal}'].ok()!==false)closeM()">Salvar</button>`))}</div>
   </div></div>`;
 }
 
