@@ -1128,7 +1128,11 @@ async function syncCloudSnapshotOnBoot(options){
 
   const localTs=getLocalDataTs();
   const cloudTs=getCloudSnapshotTs(result);
-  const shouldKeepLocal=(localTs>0&&localCount>0&&(cloudTs===0||cloudTs<localTs))||(localCount>0&&cloudCount===0);
+  // force:true → usuário pediu explicitamente; sempre aplica a nuvem (ex: botão "Baixar da nuvem")
+  // Realtime → só aplica se a nuvem for realmente mais nova (evita sobrescrever edição local concorrente)
+  const shouldKeepLocal=!opts.force&&(
+    (localTs>0&&localCount>0&&(cloudTs===0||cloudTs<=localTs))||(localCount>0&&cloudCount===0)
+  );
   if(shouldKeepLocal){
     // Evita apagar alterações locais quando a nuvem está atrasada.
     if(window.EventProSupabase?.pushSnapshot){
@@ -1182,7 +1186,7 @@ async function runPullRefreshSync(){
   PULL_REFRESH.running=true;
   updatePullRefreshIndicator({show:true,loading:true,text:'Atualizando dados...'});
   try{
-    const status=await syncCloudSnapshotOnBoot();
+    const status=await syncCloudSnapshotOnBoot({force:true});
     if(status?.updated){
       toast('Dados atualizados com sucesso.','ok');
     }else if(status?.reason==='no-session'){
@@ -7400,9 +7404,12 @@ function startRealtimeSync(){
   window.EventProSupabase.subscribeToSnapshot(S.companyId,async function(payload){
     // Ignora eventos que vieram do próprio dispositivo (mesmo updated_at que acabamos de enviar)
     if(PULL_REFRESH.running||S.syncStatus.pending)return;
-    console.log('[Realtime] snapshot atualizado por outro dispositivo — aplicando...');
-    toast('☁️ Dados atualizados por outro dispositivo','ok');
-    await syncCloudSnapshotOnBoot({force:true});
+    console.log('[Realtime] snapshot atualizado por outro dispositivo — verificando timestamp...');
+    // Não usa force: respeita timestamp para não sobrescrever edit local concorrente
+    const result=await syncCloudSnapshotOnBoot({force:false});
+    if(result?.updated){
+      toast('☁️ Dados atualizados por outro dispositivo','ok');
+    }
   });
 }
 
