@@ -1523,7 +1523,13 @@ function toast(msg,t='ok'){
   setTimeout(()=>el.classList.add('show'),10);
   setTimeout(()=>{el.classList.remove('show');setTimeout(()=>el.remove(),400);},3000);
 }
-function nav(p){S.page=p;S.userMenuOpen=false;render();}
+function nav(p){
+  if(S.in&&!canAccessPage(p)){
+    toast('Você não tem permissão para acessar esta seção.','err');
+    return;
+  }
+  S.page=p;S.userMenuOpen=false;render();
+}
 function toggleSidebar(){
   S.sidebarCollapsed=!S.sidebarCollapsed;
   if(S.sidebarCollapsed)S.userMenuOpen=false;
@@ -3150,7 +3156,7 @@ function toggleRecurringExpenseStatus(expenseId){
 }
 
 function deleteRecurringExpense(expenseId){
-  if(!requireRole(['admin','manager'],'Apenas admin/manager podem excluir recorrências.'))return;
+  if(!requireRole(['admin'],'Apenas administradores podem excluir despesas recorrentes.'))return;
   const expense=(DB.recurringExpenses||[]).find(item=>Number(item.id)===Number(expenseId));
   if(!expense)return;
   const ok=window.confirm(`Excluir a recorrência "${expense.name}"?`);
@@ -3550,7 +3556,7 @@ function resetContractPrefillEvent(eventId){
 }
 
 function deletePaymentMethod(id){
-  if(!requireRole(['admin'],'Apenas admin pode remover formas de pagamento.'))return;
+  if(!requireRole(['admin'],'Apenas administradores podem remover formas de pagamento.'))return;
   if(DB.paymentMethods.length<=1){toast('Mantenha pelo menos uma forma de pagamento.','err');return;}
   DB.paymentMethods=DB.paymentMethods.filter(pm=>pm.id!==id);
   saveDB();
@@ -4862,11 +4868,13 @@ function deleteEquip(equipId){
 // ═══════════════════════════════════════════════════════════
 // SIDEBAR NAV
 // ═══════════════════════════════════════════════════════════
+const EMPLOYEE_PAGES=new Set(['dashboard','agenda','checklist','estoque','manutencao','notifs']);
+
 const NAVS=[
   {s:'Principal',items:[
     {id:'dashboard',ic:'◈',lb:'Dashboard'},
     {id:'agenda',ic:'◷',lb:'Agenda'},
-    {id:'clientes',ic:'◉',lb:'Clientes'},
+    {id:'clientes',ic:'◉',lb:'Clientes',roles:['admin','manager']},
   ]},
   {s:'Operacional',items:[
     {id:'estoque',ic:'◫',lb:'Estoque'},
@@ -4874,25 +4882,38 @@ const NAVS=[
     {id:'checklist',ic:'◻',lb:'Checklist'},
   ]},
   {s:'Comercial',items:[
-    {id:'financeiro',ic:'◎',lb:'Financeiro'},
-    {id:'resultados_evento',ic:'◍',lb:'Resultados',ownerOnly:true},
-    {id:'orcamentos',ic:'◌',lb:'Orçamentos'},
-    {id:'contratos',ic:'◈',lb:'Contratos'},
+    {id:'financeiro',ic:'◎',lb:'Financeiro',roles:['admin','manager']},
+    {id:'resultados_evento',ic:'◍',lb:'Resultados',ownerOnly:true,roles:['admin','manager']},
+    {id:'orcamentos',ic:'◌',lb:'Orçamentos',roles:['admin','manager']},
+    {id:'contratos',ic:'◈',lb:'Contratos',roles:['admin','manager']},
   ]},
   {s:'Gestão',items:[
-    {id:'objetivos_compras',ic:'◎',lb:'Objetivos e Compras'},
-    {id:'nps',ic:'◐',lb:'NPS & Avaliações'},
+    {id:'objetivos_compras',ic:'◎',lb:'Objetivos e Compras',roles:['admin','manager']},
+    {id:'nps',ic:'◐',lb:'NPS & Avaliações',roles:['admin','manager']},
     {id:'notifs',ic:'◔',lb:'Notificações',badge:'3',bc:'nb-red'},
   ]},
 ];
 
+function canAccessPage(pageId){
+  const role=currentRole();
+  if(role==='admin'||role==='manager')return true;
+  // employee: acessa apenas páginas liberadas
+  return EMPLOYEE_PAGES.has(pageId);
+}
+
 function renderSidebar(){
   const notifCount=getNotifications().length;
+  const role=currentRole();
   let nav='';
   NAVS.forEach(sec=>{
+    const visibleItems=sec.items.filter(it=>{
+      if(it.ownerOnly&&!isCompanyOwner())return false;
+      if(it.roles&&!it.roles.includes(role))return false;
+      return true;
+    });
+    if(!visibleItems.length)return;
     nav+=`<div class="nav-sec"><div class="nav-sec-label">${sec.s}</div>`;
-    sec.items.forEach(it=>{
-      if(it.ownerOnly&&!isCompanyOwner())return;
+    visibleItems.forEach(it=>{
       const badgeValue=it.id==='notifs'?String(notifCount||''):it.badge;
       const badgeClass=it.id==='notifs'?(notifCount?'nb-red':''):(it.bc||'');
       const bdg=badgeValue?`<span class="nav-badge ${badgeClass}">${badgeValue}</span>`:'';
@@ -4900,6 +4921,8 @@ function renderSidebar(){
     });
     nav+='</div>';
   });
+  const isEmployee=role==='employee';
+  const isManager=role==='manager';
   return`<div id="sidebar">
   <div class="sb-logo" onclick="toggleSidebar()" title="${S.sidebarCollapsed?'Expandir':'Recolher'} barra lateral"><div class="logo-icon">EP</div><div class="logo-name">EventPro</div><div class="logo-pro">${S.sidebarCollapsed?'▸':'◂'}</div></div>
   <nav class="sb-nav">${nav}</nav>
@@ -4909,9 +4932,9 @@ function renderSidebar(){
     <div class="user-actions" onclick="event.stopPropagation();">
       <button class="user-menu-btn" onclick="toggleUserMenu(event)" title="Mais opções">⋯</button>
       ${S.userMenuOpen?`<div class="user-menu">
-        <button class="user-menu-item" onclick="userMenuAction('equipe')">👥 Equipe</button>
-        <button class="user-menu-item" onclick="userMenuAction('categorias_estoque')">🗂 Categorias de estoque</button>
-        <button class="user-menu-item" onclick="userMenuAction('configuracoes')">⚙ Configurações</button>
+        ${!isEmployee?`<button class="user-menu-item" onclick="userMenuAction('equipe')">👥 Equipe</button>`:''}
+        ${!isEmployee?`<button class="user-menu-item" onclick="userMenuAction('categorias_estoque')">🗂 Categorias de estoque</button>`:''}
+        ${!isEmployee&&!isManager?`<button class="user-menu-item" onclick="userMenuAction('configuracoes')">⚙ Configurações</button>`:''}
         <button class="user-menu-item danger" onclick="userMenuAction('logout')">↩ Finalizar sessão</button>
       </div>`:''}
     </div>
@@ -6288,7 +6311,8 @@ function pgClientes(){
 
 // SYSTEM USER MANAGEMENT
 function openAddSystemUser(){
-  if(!requireRole(['admin'],'Apenas administradores podem criar usuários.'))return;
+  const role=currentRole();
+  if(role!=='admin'&&role!=='manager'){toast('Sem permissão para criar usuários.','err');return;}
   const compId=Number(S.companyId||1);
   const employees=(DB_ALL?.users||[]).filter(u=>Number(u.empresa_id)===compId&&roleNorm(u.role)!=='admin');
   if(employees.length>=3){toast('Limite de usuários atingido para o plano atual.','err');return;}
@@ -6296,6 +6320,8 @@ function openAddSystemUser(){
   const overlay=document.createElement('div');
   overlay.id='sysUserModal';
   overlay.className='modal-ov open';
+  // Gerente só pode criar funcionário comum
+  const isManager=role==='manager';
   overlay.innerHTML=`<div class="modal" style="max-width:380px;" onclick="event.stopPropagation()">
     <div class="modal-hd"><span class="modal-title">Novo Usuário do Sistema</span><button class="btn btn-ghost btn-icon" onclick="document.getElementById('sysUserModal').remove()" style="font-size:19px;border:none;line-height:1;">×</button></div>
     <div class="modal-bd">
@@ -6305,7 +6331,7 @@ function openAddSystemUser(){
       <div class="fg"><label class="fl">Confirmar Senha <span style="color:var(--red)">*</span></label><input class="fc" type="password" id="suSenha2" placeholder="Repita a senha"></div>
       <div class="fg"><label class="fl">Perfil <span style="color:var(--red)">*</span></label>
         <select class="fc" id="suRole">
-          <option value="manager">Manager (Gerente)</option>
+          ${!isManager?'<option value="manager">Manager (Gerente)</option>':''}
           <option value="employee">Employee (Funcionário)</option>
         </select>
       </div>
@@ -6318,7 +6344,8 @@ function openAddSystemUser(){
 }
 
 async function addSystemUser(){
-  if(!requireRole(['admin'],'Apenas administradores podem criar usuários.'))return;
+  const role=currentRole();
+  if(role!=='admin'&&role!=='manager'){toast('Sem permissão para criar usuários.','err');return;}
   const compId=Number(S.companyId||1);
   const employees=(DB_ALL?.users||[]).filter(u=>Number(u.empresa_id)===compId&&roleNorm(u.role)!=='admin');
   if(employees.length>=3){toast('Limite de usuários atingido para o plano atual.','err');return;}
@@ -6327,7 +6354,10 @@ async function addSystemUser(){
   const email=(document.getElementById('suEmail')?.value||'').trim().toLowerCase();
   const senha=(document.getElementById('suSenha')?.value||'').trim();
   const senha2=(document.getElementById('suSenha2')?.value||'').trim();
-  const role=(document.getElementById('suRole')?.value||'employee');
+  const selectedRole=(document.getElementById('suRole')?.value||'employee');
+  // Gerente só pode criar funcionário
+  const role2=currentRole();
+  const finalRole=(role2==='manager'&&selectedRole==='manager')?'employee':selectedRole;
 
   if(!nome){toast('Informe o nome do usuário.','err');return;}
   if(!email||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){toast('Informe um email válido.','err');return;}
@@ -6338,7 +6368,7 @@ async function addSystemUser(){
   }
 
   if(window.EventProSupabase?.createManagedUser){
-    const remoteSignup=await window.EventProSupabase.createManagedUser(email,senha,{ full_name:nome, role:roleNorm(role), company_id:compId });
+    const remoteSignup=await window.EventProSupabase.createManagedUser(email,senha,{ full_name:nome, role:roleNorm(finalRole), company_id:compId });
     if(remoteSignup?.error){
       console.error('Falha ao criar usuário no Supabase:',remoteSignup.error);
       toast('Não foi possível criar o login no Supabase. Verifique Auth e tente novamente.','err');
@@ -6348,7 +6378,7 @@ async function addSystemUser(){
 
   const pwdHash=await hashPassword(senha);
   const newId=nextId(DB_ALL.users||[{id:0}]);
-  const newUser={id:newId,name:nome,email,role:roleNorm(role),empresa_id:compId,initials:initialsFromName(nome),passwordHash:pwdHash,mustResetPassword:true};
+  const newUser={id:newId,name:nome,email,role:roleNorm(finalRole),empresa_id:compId,initials:initialsFromName(nome),passwordHash:pwdHash,mustResetPassword:true};
   DB_ALL.users.push(newUser);
   localStorage.setItem('eventpro_db_all',JSON.stringify(DB_ALL));
   document.getElementById('sysUserModal')?.remove();
@@ -7364,6 +7394,10 @@ function render(){
     ensureCompanyOnboardingState();
     S.companyOnboarding.step=1;
     S.modal='companyOnboarding';
+  }
+  // Redireciona funcionário se estiver em página proibida
+  if(S.in&&!canAccessPage(S.page)){
+    S.page='agenda';
   }
   const pg=(PAGES[S.page]||pgDashboard)();
   root.innerHTML=`<div id="app" class="${S.sidebarCollapsed?'sidebar-collapsed':''}">
