@@ -71,6 +71,11 @@ body{font-family:var(--fb);background:var(--bg);color:var(--text);font-size:14px
 #main{flex:1;overflow:hidden;display:flex;flex-direction:column;}
 #topbar{height:54px;background:var(--bg2);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 18px;gap:10px;flex-shrink:0;}
 .topbar-title{font-family:var(--fh);font-size:16px;font-weight:600;flex:1;}
+.sync-badge{display:inline-flex;align-items:center;gap:3px;font-size:11px;font-weight:600;padding:3px 7px;border-radius:20px;cursor:default;white-space:nowrap;}
+.sync-badge.sync-ok{background:rgba(34,197,94,.15);color:#16a34a;}
+.sync-badge.sync-pending{background:rgba(99,102,241,.15);color:var(--accent);animation:syncpulse 1s infinite;}
+.sync-badge.sync-error{background:rgba(239,68,68,.15);color:#dc2626;}
+@keyframes syncpulse{0%,100%{opacity:1}50%{opacity:.4}}
 .search-box{display:flex;align-items:center;gap:7px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);padding:5px 11px;font-size:12.5px;color:var(--text3);width:190px;}
 #content{flex:1;overflow-y:auto;padding:18px;}
 
@@ -300,9 +305,75 @@ function pgConfig(){
       <div style="padding:10px 16px;font-size:11px;color:var(--text3);border-top:1px solid var(--border);">🔒 LGPD: Dados de usuários utilizados apenas para acesso à plataforma. Isolados por empresa.</div>
     </div>
   `:'';
-  return `<div class="page-content"><div class="card"><div class="card-header"><span class="card-title">🏢 Perfil da Empresa</span></div><div style="padding:20px 24px;">${editFields}</div></div>${usersSection}</div>`;
+  // Sync card
+  const ss=S.syncStatus;
+  let syncIcon,syncLabel,syncColor;
+  if(ss.pending){syncIcon='⟳';syncLabel='Sincronizando...';syncColor='var(--accent)';}
+  else if(ss.error){syncIcon='✕';syncLabel='Falha na última sincronização';syncColor='var(--red)';}
+  else if(ss.lastSyncAt){
+    const secs=Math.round((Date.now()-ss.lastSyncAt)/1000);
+    const when=secs<5?'agora mesmo':secs<60?`há ${secs}s`:secs<3600?`há ${Math.round(secs/60)} min`:`há mais de 1h`;
+    const dur=ss.lastDuration!=null?` — levou ${ss.lastDuration}ms`:'';
+    syncIcon='✓';syncLabel=`Sincronizado ${when}${dur}`;syncColor='#16a34a';
+  }else{syncIcon='☁';syncLabel='Nunca sincronizado nesta sessão';syncColor='var(--text3)';}
+  const syncCard=`<div class="card" style="margin-top:16px;">
+    <div class="card-header"><span class="card-title">☁️ Sincronização com a Nuvem</span></div>
+    <div style="padding:20px 24px;">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:18px;">
+        <span style="font-size:22px;color:${syncColor};${ss.pending?'animation:syncpulse 1s infinite':''}">${syncIcon}</span>
+        <span style="font-size:13px;color:${syncColor};font-weight:600;">${syncLabel}</span>
+      </div>
+      <p style="font-size:12.5px;color:var(--text3);margin-bottom:16px;line-height:1.6;">Use o botão abaixo para forçar o envio dos dados locais para a nuvem agora. A sincronização automática ocorre a cada vez que você salva um dado no app.</p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        <button class="btn btn-primary" onclick="manualSync()" ${ss.pending?'disabled':''}>☁️ Sincronizar agora</button>
+        <button class="btn btn-secondary" onclick="manualPull()" ${ss.pending?'disabled':''}>⬇️ Baixar da nuvem</button>
+      </div>
+    </div>
+  </div>`;
+  return `<div class="page-content"><div class="card"><div class="card-header"><span class="card-title">🏢 Perfil da Empresa</span></div><div style="padding:20px 24px;">${editFields}</div></div>${syncCard}${usersSection}</div>`;
 }
 
+async function manualSync(){
+  if(S.syncStatus.pending)return;
+  if(!S.companyId){toast('Nenhuma empresa ativa na sessão.','err');return;}
+  if(!window.EventProSupabase?.pushSnapshot){toast('Módulo de nuvem não carregado ainda. Aguarde.','err');return;}
+  const _start=Date.now();
+  S.syncStatus.pending=true;
+  S.syncStatus.error=false;
+  render();
+  try{
+    const res=await window.EventProSupabase.pushSnapshot(Number(S.companyId),DB_ALL,CLISTS_ALL);
+    if(res?.error)throw res.error;
+    S.syncStatus.lastSyncAt=Date.now();
+    S.syncStatus.lastDuration=Date.now()-_start;
+    S.syncStatus.error=false;
+    toast(`✅ Sincronizado em ${S.syncStatus.lastDuration}ms`);
+  }catch(e){
+    S.syncStatus.error=true;
+    toast('Falha ao sincronizar: '+(e?.message||e),'err');
+  }finally{
+    S.syncStatus.pending=false;
+    render();
+  }
+}
+async function manualPull(){
+  if(S.syncStatus.pending)return;
+  if(!S.companyId){toast('Nenhuma empresa ativa na sessão.','err');return;}
+  S.syncStatus.pending=true;
+  render();
+  try{
+    const result=await syncCloudSnapshotOnBoot({force:true});
+    if(result?.updated)toast('✅ Dados atualizados da nuvem!');
+    else toast('Dados locais já estão na versão mais recente.');
+    S.syncStatus.error=false;
+  }catch(e){
+    S.syncStatus.error=true;
+    toast('Falha ao baixar da nuvem: '+(e?.message||e),'err');
+  }finally{
+    S.syncStatus.pending=false;
+    render();
+  }
+}
 function handleLogoUpload(e){
   const file=e.target.files[0];
   if(!file)return;
@@ -797,6 +868,7 @@ let S = {
   companyId:null,
   loginView:'login',
   authSyncing:false,
+  syncStatus:{pending:false,lastSyncAt:null,lastDuration:null,error:false},
   authRecovery:{
     requestLoading:false,
     requestMessage:'',
@@ -953,16 +1025,29 @@ function saveDB(){
     if(S.currentUser?.id)localStorage.setItem('eventpro_session_user',String(S.currentUser.id));
     // Sync para nuvem (async, não bloqueia UI)
     if(window.EventProSupabase?.pushSnapshot){
+      const _pushStart=Date.now();
+      S.syncStatus.pending=true;
+      S.syncStatus.error=false;
       window.EventProSupabase.pushSnapshot(empresaId,DB_ALL,CLISTS_ALL)
         .then(function(res){
+          S.syncStatus.pending=false;
           if(res?.error){
+            S.syncStatus.error=true;
             console.warn('Cloud sync push falhou (não crítico):',res.error);
             toastSyncWarn('Salvo localmente, mas não foi possível enviar para nuvem agora.');
+          }else{
+            S.syncStatus.lastSyncAt=Date.now();
+            S.syncStatus.lastDuration=Date.now()-_pushStart;
+            S.syncStatus.error=false;
           }
+          render();
         })
         .catch(function(e){
+          S.syncStatus.pending=false;
+          S.syncStatus.error=true;
           console.warn('Cloud sync push falhou (não crítico):',e);
           toastSyncWarn('Salvo localmente, mas não foi possível enviar para nuvem agora.');
+          render();
         });
     }
   }catch(e){
@@ -4842,6 +4927,18 @@ function logout(){
 // TOPBAR
 // ═══════════════════════════════════════════════════════════
 const TITLES={dashboard:'Dashboard',agenda:'Agenda de Eventos',estoque:'Gestão de Estoque',manutencao:'Manutenção Operacional',checklist:'Checklist',financeiro:'Financeiro',resultados_evento:'Resultados por Evento',orcamentos:'Orçamentos Comerciais',contratos:'Contratos',clientes:'Clientes & CRM',equipe:'Equipe',objetivos_compras:'Objetivos e Compras',categorias_estoque:'Categorias de Estoque',nps:'NPS & Avaliações',notifs:'Notificações',configuracoes:'Configurações da Empresa'};
+function renderSyncBadge(){
+  if(!S.in)return'';
+  if(S.syncStatus.pending)return`<span class="sync-badge sync-pending" title="Enviando para nuvem...">☁ ⟳</span>`;
+  if(S.syncStatus.error)return`<span class="sync-badge sync-error" title="Falha na sincronização">☁ ✕</span>`;
+  if(S.syncStatus.lastSyncAt){
+    const secs=Math.round((Date.now()-S.syncStatus.lastSyncAt)/1000);
+    const when=secs<5?'agora':secs<60?`${secs}s atrás`:secs<3600?`${Math.round(secs/60)}min atrás`:'há algum tempo';
+    const dur=S.syncStatus.lastDuration!=null?` em ${S.syncStatus.lastDuration}ms`:'';
+    return`<span class="sync-badge sync-ok" title="Sincronizado ${when}${dur}">☁ ✓ ${when}</span>`;
+  }
+  return'';
+}
 function renderTopbar(){
   const notifCount=getNotifications().length;
   let actions='';
@@ -4850,6 +4947,7 @@ function renderTopbar(){
   <div class="topbar-title">${TITLES[S.page]||'EventPro'}</div>
   <div class="search-box"><span>🔍</span><span>Buscar...</span></div>
   ${actions}
+  ${renderSyncBadge()}
   <div style="position:relative;cursor:pointer;" onclick="nav('notifs')">
     <div class="btn btn-ghost btn-icon" style="font-size:15px;">🔔</div>
     ${notifCount?`<span style="position:absolute;top:5px;right:5px;min-width:14px;height:14px;padding:0 4px;background:var(--red);border-radius:20px;border:2px solid var(--bg2);font-size:9px;font-weight:700;color:#fff;display:flex;align-items:center;justify-content:center;">${notifCount}</span>`:''}
