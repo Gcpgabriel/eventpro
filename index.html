@@ -943,6 +943,7 @@ let S = {
   agendaEventDetailId:null,
   viewClientId:null,
   editClientId:null,
+  editProposalId:null,
   contractPrefillEventId:null,
   contractEventTmp:null,
   calM:4,calY:2025,
@@ -1645,7 +1646,12 @@ function userMenuAction(action){
 function openM(id){
   S.modal=id;
   render();
-  if(id==='newContract')setTimeout(toggleContractPaymentDetails,0);
+  if(id==='newContract')setTimeout(function(){
+    toggleContractPaymentDetails();
+    updateContractSignalPreview();
+    toggleContractExpensesFields();
+    contractWizardGoToStep(1);
+  },0);
 }
 function closeM(){S.modal=null;render();}
 function fmtVal(v){return'R$ '+v.toLocaleString('pt-BR');}
@@ -1709,6 +1715,69 @@ function toggleContractPaymentDetails(){
   if(remainingDueField&&!remainingDueField.value){
     remainingDueField.value=ev?.date||new Date().toISOString().slice(0,10);
   }
+}
+
+function contractWizardGoToStep(step){
+  const next=Math.max(1,Math.min(3,Number(step||1)));
+  const steps=[1,2,3];
+  steps.forEach((n)=>{
+    const panel=document.getElementById(`contractStep${n}`);
+    const badge=document.getElementById(`contractStepBadge${n}`);
+    if(panel)panel.style.display=n===next?'block':'none';
+    if(badge)badge.style.opacity=n===next?'1':'.45';
+  });
+}
+
+function contractWizardNextStep(){
+  const current=[1,2,3].find(n=>document.getElementById(`contractStep${n}`)?.style.display!=='none')||1;
+  contractWizardGoToStep(current+1);
+}
+
+function contractWizardPrevStep(){
+  const current=[1,2,3].find(n=>document.getElementById(`contractStep${n}`)?.style.display!=='none')||1;
+  contractWizardGoToStep(current-1);
+}
+
+function updateContractSignalPreview(){
+  const totalField=document.getElementById('contractTotalValue');
+  const signalPctField=document.getElementById('contractSignalPct');
+  const signalValueField=document.getElementById('contractSignalValue');
+  const finalField=document.getElementById('contractFinalValue');
+  if(!totalField||!signalPctField||!signalValueField||!finalField)return;
+  const total=Math.max(0,Number(totalField.value||0));
+  const pct=Math.max(0,Math.min(100,Number(signalPctField.value||0)));
+  const signal=Math.round((total*(pct/100))*100)/100;
+  const final=Math.max(0,Math.round((total-signal)*100)/100);
+  signalValueField.value=signal.toFixed(2);
+  finalField.value=final.toFixed(2);
+}
+
+function contractExpensesEnabled(){
+  return !!document.getElementById('contractEnableExpenses')?.checked;
+}
+
+function toggleContractExpensesFields(){
+  const wrap=document.getElementById('contractExpensesWrap');
+  if(!wrap)return;
+  wrap.style.display=contractExpensesEnabled()?'grid':'none';
+}
+
+function collectContractExpenseBreakdown(){
+  if(!contractExpensesEnabled())return [];
+  const defs=[
+    {id:'Food',label:'Alimentação equipe'},
+    {id:'Hotel',label:'Hospedagem'},
+    {id:'Transport',label:'Transporte'},
+    {id:'Team',label:'Equipe'},
+    {id:'Other',label:'Outros (montagem)'},
+  ];
+  return defs
+    .map((d)=>{
+      const value=Math.max(0,Number(document.getElementById(`contractExpense${d.id}`)?.value||0));
+      const responsible=document.getElementById(`contractExpense${d.id}Resp`)?.value||'empresa';
+      return {label:d.label,value,responsible};
+    })
+    .filter(item=>item.value>0);
 }
 
 function extractCityUFFromAddress(address){
@@ -2534,8 +2603,9 @@ function generateContractPDF(ev,contract,cl){
   const clienteDoc=contract.clientDoc||(cl?.doc||'');
   const clienteEndereco=esc(contract.clientAddr||cl?.address||'');
   const services=esc(contract.services||'Som e Iluminação');
-  const valorNum=fmtVal(ev.value||0);
-  const valorExt=valorPorExtenso(ev.value||0);
+  const contractTotal=Math.max(0,Number(contract?.totalValue||ev.value||0));
+  const valorNum=fmtVal(contractTotal);
+  const valorExt=valorPorExtenso(contractTotal);
   const logoB64=DB.company.logo||'';
   const paymentParcels=Array.isArray(contract?.paymentPlan?.parcels)?contract.paymentPlan.parcels:[];
   const paymentMethodName=String(contract.payment||'').trim();
@@ -2667,21 +2737,54 @@ function createContract(){
   const ev=DB.events.find(e=>e.id===eid);
   if(!ev){toast('Selecione um evento válido.','err');return false;}
 
-  const cl=DB.clients.find(c=>c.name===ev.client);
+  const eventName=document.getElementById('contractEventName')?.value.trim()||ev.name;
+  const clientName=document.getElementById('contractClientName')?.value.trim()||ev.client;
+  const eventDate=(document.getElementById('contractEventDate')?.value||ev.date||'').trim();
+  const eventTime=(document.getElementById('contractEventTime')?.value||ev.time||'19:00').trim();
+  const eventEndTime=(document.getElementById('contractEventEndTime')?.value||ev.endTime||'23:00').trim();
+  const eventVenue=document.getElementById('contractEventVenue')?.value.trim()||ev.venue||'';
+  const cl=DB.clients.find(c=>c.name===clientName)||DB.clients.find(c=>c.name===ev.client);
   const duration=Number(document.getElementById('contractDuration')?.value||6);
   const paymentId=Number(document.getElementById('contractPayment')?.value||1);
   const pm=DB.paymentMethods.find(p=>p.id===paymentId)||DB.paymentMethods[0];
-  const notes=document.getElementById('contractNotes')?.value.trim()||'';
+  const notesBase=document.getElementById('contractNotes')?.value.trim()||'';
+  const serviceNotes=document.getElementById('contractServiceNotes')?.value.trim()||'';
   const clientAddr=document.getElementById('contractClientAddr')?.value.trim()||cl?.address||'';
   const checkedServices=Array.from(document.querySelectorAll('[name="contractService"]:checked')).map(el=>el.value);
   const customServices=document.getElementById('contractServicesCustom')?.value.trim();
+  const totalValue=Math.max(0,Math.round(Number(document.getElementById('contractTotalValue')?.value||ev.value||0)*100)/100);
+  const signalPct=Math.max(0,Math.min(100,Number(document.getElementById('contractSignalPct')?.value||0)));
+  const signalDue=(document.getElementById('contractSignalDue')?.value||'').trim()||new Date().toISOString().slice(0,10);
+  const signalValue=Math.max(0,Math.round(Number(document.getElementById('contractSignalValue')?.value||0)*100)/100);
+  const finalValue=Math.max(0,Math.round(Number(document.getElementById('contractFinalValue')?.value||0)*100)/100);
+  const expenses=collectContractExpenseBreakdown();
+  const equipmentPricing=Array.from(document.querySelectorAll('[data-contract-eq-id]')).map(input=>{
+    const eqId=Number(input.getAttribute('data-contract-eq-id')||0);
+    const qty=Math.max(1,Number(input.getAttribute('data-contract-eq-qty')||1));
+    const unitValue=Math.max(0,Math.round(Number(input.value||0)*100)/100);
+    const eq=DB.equipment.find(item=>Number(item.id)===eqId);
+    return {eqId,name:eq?.name||`Equipamento ${eqId}`,qty,unitValue,totalValue:Math.round(unitValue*qty*100)/100};
+  }).filter(item=>item.eqId>0);
   if(customServices)checkedServices.push(customServices);
   const services=checkedServices.join(', ')||'Som e Iluminação';
+  const notes=[notesBase,serviceNotes].filter(Boolean).join('\n');
 
+  if(!eventName||!clientName||!eventDate||!eventVenue){toast('Preencha os dados principais do evento no Passo 1.','err');return false;}
   if(!services){toast('Selecione pelo menos uma categoria de serviços.','err');return false;}
+  if(totalValue<=0){toast('Informe um valor total válido no Passo 3.','err');return false;}
+
+  // Mantém o evento alinhado com os dados informados no contrato.
+  ev.name=eventName;
+  ev.client=clientName;
+  ev.date=eventDate;
+  ev.time=eventTime;
+  ev.endDate=eventDate;
+  ev.endTime=eventEndTime;
+  ev.venue=eventVenue;
+  ev.value=totalValue;
 
   let paymentPlan=null;
-  const eventTotal=Math.round(Number(ev.value||0)*100)/100;
+  const eventTotal=totalValue;
   if(contractPaymentUsesPixEntryBalance(paymentId)){
     const entryVal=Math.round(Number(document.getElementById('contractEntryValue')?.value||0)*100)/100;
     const remainingRaw=document.getElementById('contractRemainingValue')?.value;
@@ -2711,13 +2814,34 @@ function createContract(){
         {label:'Restante PIX',value:remainingVal,due:remainingDue},
       ],
     };
+  }else if(signalPct>0){
+    if(!signalDue){
+      toast('Informe a data do sinal.','err');
+      return false;
+    }
+    if(signalValue<=0||finalValue<0){
+      toast('Valores de sinal/parcela final inválidos.','err');
+      return false;
+    }
+    const diff=Math.abs((signalValue+finalValue)-eventTotal);
+    if(diff>0.01){
+      toast('Sinal + parcela final deve fechar o valor total.','err');
+      return false;
+    }
+    paymentPlan={
+      mode:'signal-final',
+      parcels:[
+        {label:`Sinal ${Math.round(signalPct)}%`,value:signalValue,due:signalDue},
+        {label:'Parcela final',value:finalValue,due:eventDate},
+      ],
+    };
   }
   
   const contract={
     id:nextId(DB.contracts),
     eventId:eid,
     clientId:cl?cl.id:null,
-    clientName:ev.client,
+    clientName:clientName,
     clientDoc:cl?.doc||'',
     clientAddr,
     services,
@@ -2725,6 +2849,10 @@ function createContract(){
     payment:pm?pm.name:'',
     paymentId:pm?pm.id:null,
     paymentPlan,
+    totalValue,
+    signalPct,
+    expenses,
+    equipmentPricing,
     penalty:10,
     notes,
     createdAt:new Date().toISOString().slice(0,10),
@@ -2749,7 +2877,7 @@ function generateContractReceivables(contract,ev){
   const existing=DB.finance.rec.filter(r=>r.type==='contract-revenue'&&r.contractId===contract.id);
   if(existing.length)return{created:0,total:existing.length};
 
-  const totalValue=Number(ev.value||0);
+  const totalValue=Number(contract.totalValue||ev.value||0);
   if(totalValue<=0)return{created:0,total:0};
 
   const pm=DB.paymentMethods.find(m=>m.id===Number(contract.paymentId));
@@ -4262,6 +4390,70 @@ function createProposal(){
 
   toast('Proposta criada! A disponibilidade será validada na aprovação do contrato. 📄');
   saveDB();
+  render();
+  return true;
+}
+
+function openProposalRevision(proposalId){
+  if(!requireRole(['admin','manager'],'Apenas admin/manager podem revisar orçamentos.'))return;
+  const source=DB.proposals.find(p=>Number(p.id)===Number(proposalId)&&!p.deletedAt);
+  if(!source){toast('Orçamento não encontrado.','err');return;}
+  S.editProposalId=Number(source.id);
+  openM('reviseProposal');
+}
+
+function createProposalRevision(){
+  if(!requireRole(['admin','manager'],'Apenas admin/manager podem revisar orçamentos.'))return false;
+  const source=DB.proposals.find(p=>Number(p.id)===Number(S.editProposalId||0)&&!p.deletedAt);
+  if(!source){toast('Orçamento base não encontrado.','err');return false;}
+
+  const client=document.getElementById('revProposalClient')?.value;
+  const event=document.getElementById('revProposalEvent')?.value.trim();
+  const date=document.getElementById('revProposalDate')?.value;
+  const endDate=document.getElementById('revProposalEndDate')?.value||date;
+  const time=document.getElementById('revProposalTime')?.value||'19:00';
+  const validityDays=Number(document.getElementById('revProposalValidityDays')?.value||source.validityDays||7);
+  const val=Number(document.getElementById('revProposalValue')?.value||0);
+
+  if(!client||!event||!date||!endDate||val<=0){
+    toast('Preencha cliente, evento, datas e valor.','err');
+    return false;
+  }
+
+  const selectedCategories=Array.from(document.querySelectorAll('[name="revProposalService"]:checked')).map(el=>el.value);
+  const serviceCategories=selectedCategories.length?selectedCategories:deepClone(source.serviceCategories||[]);
+  const allowedValidity=[3,7,15,30];
+  const normalizedValidity=allowedValidity.includes(validityDays)?validityDays:7;
+
+  const revisionRootId=Number(source.revisionRootId||source.revisionOf||source.id);
+  const revisionNo=(DB.proposals||[])
+    .filter(p=>Number(p.revisionRootId||p.revisionOf||p.id)===revisionRootId)
+    .reduce((max,p)=>Math.max(max,Number(p.revisionNo||1)),1)+1;
+
+  DB.proposals.push({
+    id:nextId(DB.proposals),
+    client,
+    event,
+    val,
+    date,
+    endDate,
+    time,
+    validityDays:normalizedValidity,
+    status:'pendente',
+    items:deepClone(source.items||[]),
+    serviceCategories,
+    equipIds:deepClone(source.equipIds||[]),
+    equipPlan:deepClone(source.equipPlan||[]),
+    consumablePlan:deepClone(source.consumablePlan||[]),
+    revisionRootId,
+    revisionOf:Number(source.id),
+    revisionNo,
+    empresa_id:Number(S.companyId||1),
+  });
+
+  S.editProposalId=null;
+  saveDB();
+  toast(`Revisão do orçamento criada (v${revisionNo}).`,'ok');
   render();
   return true;
 }
@@ -6333,12 +6525,12 @@ function pgOrcamentos(){
       <td><div style="display:flex;gap:3px;align-items:center;"><button class="btn btn-ghost btn-sm" onclick="restoreProposal(${p.id})" title="Restaurar">♻️</button><button class="btn btn-ghost btn-sm" style="color:var(--red);" onclick="permanentlyDeleteProposal(${p.id})" title="Deletar permanentemente">⛔</button></div></td>
     </tr>`:`<tr>
       <td style="font-weight:500">${p.client}</td>
-      <td>${p.event}</td>
+      <td>${p.event}${Number(p.revisionNo||1)>1?`<div style="font-size:10.5px;color:var(--text3);">Revisão v${Number(p.revisionNo)}</div>`:''}</td>
       <td style="max-width:160px;"><div style="display:flex;gap:3px;flex-wrap:wrap;">${p.items.map(i=>`<span class="badge b-gray">${i}</span>`).join('')}</div></td>
       <td style="font-weight:700;color:var(--green)">${fmtVal(p.val)}</td>
       <td>${p.date}${p.endDate&&p.endDate!==p.date?` a ${p.endDate}`:''}<div style="font-size:10.5px;color:var(--text3);">Validade: ${Number(p.validityDays||7)} dias</div></td>
       <td><div style="display:flex;align-items:center;gap:6px;"><span class="badge ${sc[p.status]}">${p.status}</span><select class="fc" style="width:118px;padding:5px 7px;font-size:11.5px;" onchange="updateProposalStatus(${p.id},this.value)"><option value="pendente" ${p.status==='pendente'?'selected':''}>pendente</option><option value="aprovado" ${p.status==='aprovado'?'selected':''}>aprovado</option><option value="rejeitado" ${p.status==='rejeitado'?'selected':''}>rejeitado</option><option value="alterar" ${p.status==='alterar'?'selected':''}>alterar</option></select></div></td>
-      <td><div style="display:flex;gap:3px;align-items:center;"><button class="btn btn-ghost btn-sm" onclick="toast('Proposta aberta!')">👁</button><button class="btn btn-ghost btn-sm" onclick="generateProposalPDF(DB.proposals.find(pr=>pr.id===${p.id}))">📄</button><button class="btn btn-ghost btn-sm" onclick="shareProposal(${p.id})">📤</button><button class="btn btn-ghost btn-sm" onclick="softDeleteProposal(${p.id})" title="Excluir (soft delete)">🗑</button></div></td>
+      <td><div style="display:flex;gap:3px;align-items:center;"><button class="btn btn-ghost btn-sm" onclick="toast('Proposta aberta!')">👁</button><button class="btn btn-ghost btn-sm" onclick="generateProposalPDF(DB.proposals.find(pr=>pr.id===${p.id}))">📄</button><button class="btn btn-ghost btn-sm" onclick="shareProposal(${p.id})">📤</button><button class="btn btn-ghost btn-sm" onclick="openProposalRevision(${p.id})" title="Revisar orçamento">✏️</button><button class="btn btn-ghost btn-sm" onclick="softDeleteProposal(${p.id})" title="Excluir (soft delete)">🗑</button></div></td>
     </tr>`).join(''):`<tr><td colspan="7" style="padding:18px;text-align:center;color:var(--text2);">Nenhum registro em ${filterOptions.find(opt=>opt.id===activeFilter)?.label.toLowerCase()||'filtro'}.</td></tr>`}
   </table></div></div>
   `;
@@ -6862,6 +7054,27 @@ const MODS={
     <div class="fg"><label class="fl">Disponibilidade na data</label><div id="proposalAvailPreview" style="max-height:180px;overflow:auto;background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);padding:8px;"></div></div>
     <div class="fg"><label class="fl">Observações</label><textarea class="fc" placeholder="Condições, formas de pagamento..."></textarea></div>`,
     ok:createProposal},
+  reviseProposal:{title:'Revisar Orçamento (nova versão)',body:()=>{
+    const source=DB.proposals.find(p=>Number(p.id)===Number(S.editProposalId||0)&&!p.deletedAt);
+    if(!source)return '<div class="empty"><div class="empty-ico">⚠️</div><div>Orçamento base não encontrado.</div></div>';
+    const cats=['Som','Iluminação','Estrutura','Painel de LED','Gerador','Vídeo','DJ'];
+    const preSelected=new Set(Array.isArray(source.serviceCategories)?source.serviceCategories:[]);
+    return `
+    <div style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);padding:10px;margin-bottom:10px;font-size:11.5px;">
+      Revisão será criada como <strong>novo orçamento</strong>. O anterior será mantido no histórico.
+    </div>
+    <div class="fg"><label class="fl">Cliente</label><select id="revProposalClient" class="fc">${DB.clients.map(c=>`<option ${c.name===source.client?'selected':''}>${c.name}</option>`).join('')}</select></div>
+    <div class="fg"><label class="fl">Evento</label><input id="revProposalEvent" class="fc" value="${esc(source.event||'')}"></div>
+    <div class="grid g2"><div class="fg"><label class="fl">Data Inicial</label><input id="revProposalDate" type="date" class="fc" value="${esc(source.date||'')}"></div><div class="fg"><label class="fl">Data Final</label><input id="revProposalEndDate" type="date" class="fc" value="${esc(source.endDate||source.date||'')}"></div></div>
+    <div class="grid g3"><div class="fg"><label class="fl">Hora Inicial</label><input id="revProposalTime" type="time" class="fc" value="${esc(source.time||'19:00')}"></div><div class="fg"><label class="fl">Valor Total (R$)</label><input id="revProposalValue" type="number" class="fc" value="${Number(source.val||0)}"></div><div class="fg"><label class="fl">Tempo de validade</label><select id="revProposalValidityDays" class="fc"><option value="3" ${Number(source.validityDays||7)===3?'selected':''}>3 dias</option><option value="7" ${Number(source.validityDays||7)===7?'selected':''}>7 dias</option><option value="15" ${Number(source.validityDays||7)===15?'selected':''}>15 dias</option><option value="30" ${Number(source.validityDays||7)===30?'selected':''}>30 dias</option></select></div></div>
+    <div class="fg"><label class="fl">Categorias de Serviços</label>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px;">
+        ${cats.map(cat=>`<label style="display:flex;align-items:center;gap:5px;font-size:12.5px;cursor:pointer;"><input type="checkbox" name="revProposalService" value="${cat}" ${preSelected.has(cat)?'checked':''}> ${cat}</label>`).join('')}
+      </div>
+    </div>
+    <div class="fg"><label class="fl">Itens herdados do orçamento anterior</label><div style="font-size:11.5px;color:var(--text2);background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);padding:8px;">${(source.items||[]).length?(source.items||[]).map(i=>`• ${esc(i)}`).join('<br>'):'Nenhum item'}</div></div>`;
+  },
+    ok:createProposalRevision},
   newContract:{title:'Gerar Contrato',body:()=>{
     const eid=S.contractPrefillEventId;
     const ev=eid?DB.events.find(e=>e.id===eid):null;
@@ -6870,38 +7083,90 @@ const MODS={
     const preSelectedServices=new Set(Array.isArray(linkedProposal?.serviceCategories)?linkedProposal.serviceCategories:[]);
     const eventOpts=DB.events.filter(e=>e.status==='confirmado').map(e=>`<option value="${e.id}" ${eid===e.id?'selected':''}>${e.name}</option>`).join('');
     const cats=['Som','Iluminação','Estrutura','Painel de LED','Gerador','Vídeo','DJ'];
+    const eventPlan=ev?getEventLoadPlan(ev.id):[];
+    const equipmentRows=eventPlan.map(row=>{
+      const eq=DB.equipment.find(item=>Number(item.id)===Number(row.eqId));
+      if(!eq)return '';
+      const qty=Math.max(1,Number(row.qty||1));
+      const unitDefault=eq.temporary?Math.max(0,Number(eq.rentalCost||0)):0;
+      return `<tr><td>${esc(eq.name)}</td><td>${qty}</td><td><input type="number" min="0" step="0.01" class="fc" style="width:120px;padding:5px 8px;font-size:11.5px;" data-contract-eq-id="${eq.id}" data-contract-eq-qty="${qty}" id="contractEqUnitValue-${eq.id}" value="${unitDefault.toFixed(2)}"></td></tr>`;
+    }).join('');
     
     return`
-    <div class="fg"><label class="fl">Evento</label><select id="newContractEvent" class="fc" onchange="resetContractPrefillEvent(this.value)">${eventOpts}</select></div>
-    ${ev?`<div style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);padding:10px;margin-bottom:10px;font-size:11.5px;">
-      <div><strong>Cliente:</strong> ${ev.client}</div>
-      <div><strong>Data:</strong> ${ev.date} ${ev.time}${ev.endDate&&ev.endDate!==ev.date?` a ${ev.endDate} ${ev.endTime}`:''}</div>
-      <div><strong>Local:</strong> ${ev.venue}</div>
-      <div><strong>Valor:</strong> ${fmtVal(ev.value)}</div>
-    </div>`:''}
-    ${cl?`<div class="fg"><label class="fl">Dados do Cliente</label><div style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);padding:8px;font-size:10.5px;"><strong>${cl.name}</strong> (${cl.type})<br>${cl.type==='PJ'?`CNPJ: ${cl.doc}`:`CPF: ${cl.doc}`}<br>Email: ${cl.email}<br>Endereço: ${cl.address||'—'}</div></div>`:`<div class="fg"><label class="fl">Cliente não encontrado - informe CNPJ/Razão Social</label><input id="contractClientDoc" class="fc" placeholder="CNPJ ou CPF"></div>`}
-    <div class="fg"><label class="fl">Endereço do Contratante</label><input id="contractClientAddr" class="fc" placeholder="Endereço do cliente" value="${cl?.address||''}"></div>
-    <div class="fg"><label class="fl">Categorias de Serviços Contratados</label>
-      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px;">
-        ${cats.map(cat=>`<label style="display:flex;align-items:center;gap:5px;font-size:12.5px;cursor:pointer;"><input type="checkbox" name="contractService" value="${cat}" ${preSelectedServices.has(cat)?'checked':''}> ${cat}</label>`).join('')}
-      </div>
-      <input id="contractServicesCustom" class="fc" style="margin-top:8px;" placeholder="Outros serviços (opcional)">
+    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
+      <span id="contractStepBadge1" class="badge b-blue">🟦 Passo 1 — Dados do Evento</span>
+      <span id="contractStepBadge2" class="badge b-purple">Passo 2 — Serviços Prestados</span>
+      <span id="contractStepBadge3" class="badge b-amber">Passo 3 — Despesas + Pagamento</span>
     </div>
-    <div class="grid g2"><div class="fg"><label class="fl">Forma de Pagamento</label><select id="contractPayment" class="fc" onchange="toggleContractPaymentDetails()">${DB.paymentMethods.map(pm=>`<option value="${pm.id}">${esc(pm.name)}</option>`).join('')}</select></div><div class="fg"><label class="fl">Duração do Evento (horas)</label><input id="contractDuration" type="number" class="fc" value="${ev?'6':''}"></div></div>
-    <div id="contractPixSplitWrap" style="display:none;background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);padding:10px;margin-bottom:10px;">
-      <div style="font-size:12px;font-weight:700;margin-bottom:8px;">PIX (Entrada + Restante)</div>
+
+    <div id="contractStep1">
+      <div class="fg"><label class="fl">Evento</label><select id="newContractEvent" class="fc" onchange="resetContractPrefillEvent(this.value)">${eventOpts}</select></div>
       <div class="grid g2">
-        <div class="fg"><label class="fl">Valor da Entrada (R$)</label><input id="contractEntryValue" type="number" min="0" step="0.01" class="fc" oninput="updateContractSplitRemainingFromEntry()"></div>
-        <div class="fg"><label class="fl">Data da Entrada</label><input id="contractEntryDue" type="date" class="fc"></div>
+        <div class="fg"><label class="fl">Nome do evento</label><input id="contractEventName" class="fc" value="${esc(ev?.name||'')}"></div>
+        <div class="fg"><label class="fl">Cliente</label><input id="contractClientName" class="fc" value="${esc(ev?.client||'')}"></div>
       </div>
       <div class="grid g2">
-        <div class="fg"><label class="fl">Valor do Restante (R$)</label><input id="contractRemainingValue" type="number" min="0" step="0.01" class="fc"></div>
-        <div class="fg"><label class="fl">Data do Restante</label><input id="contractRemainingDue" type="date" class="fc"></div>
+        <div class="fg"><label class="fl">Data</label><input id="contractEventDate" type="date" class="fc" value="${esc(ev?.date||'')}"></div>
+        <div class="fg"><label class="fl">Local</label><input id="contractEventVenue" class="fc" value="${esc(ev?.venue||'')}"></div>
       </div>
-      <div style="font-size:11px;color:var(--text2);">Informe os valores e datas para gerar automaticamente as duas parcelas no financeiro.</div>
+      <div class="grid g2">
+        <div class="fg"><label class="fl">Horário início</label><input id="contractEventTime" type="time" class="fc" value="${esc(ev?.time||'19:00')}"></div>
+        <div class="fg"><label class="fl">Horário fim</label><input id="contractEventEndTime" type="time" class="fc" value="${esc(ev?.endTime||'23:00')}"></div>
+      </div>
+      ${cl?`<div class="fg"><label class="fl">Dados do Cliente</label><div style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);padding:8px;font-size:10.5px;"><strong>${cl.name}</strong> (${cl.type})<br>${cl.type==='PJ'?`CNPJ: ${cl.doc}`:`CPF: ${cl.doc}`}<br>Email: ${cl.email}<br>Endereço: ${cl.address||'—'}</div></div>`:''}
+      <div class="fg"><label class="fl">Endereço do Contratante</label><input id="contractClientAddr" class="fc" placeholder="Endereço do cliente" value="${esc(cl?.address||'')}"></div>
+      <div class="fg"><label class="fl">Observações</label><textarea id="contractNotes" class="fc" placeholder="Observações do evento e do contrato..."></textarea></div>
+      <div style="display:flex;justify-content:flex-end;"><button type="button" class="btn btn-primary" onclick="contractWizardNextStep()">Continuar →</button></div>
     </div>
-    <div class="fg"><label class="fl">Observações / Detalhes</label><textarea id="contractNotes" class="fc" placeholder="Informações adicionais..."></textarea></div>
-    <p style="font-size:10.5px;color:var(--text3);margin-top:6px;">O contrato será gerado com base no modelo oficial da empresa.</p>`;
+
+    <div id="contractStep2" style="display:none;">
+      <div class="fg"><label class="fl">Categorias</label>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px;">
+          ${cats.map(cat=>`<label style="display:flex;align-items:center;gap:5px;font-size:12.5px;cursor:pointer;"><input type="checkbox" name="contractService" value="${cat}" ${preSelectedServices.has(cat)?'checked':''}> ${cat}</label>`).join('')}
+        </div>
+        <input id="contractServicesCustom" class="fc" style="margin-top:8px;" placeholder="Outros serviços (opcional)">
+      </div>
+      <div class="fg"><label class="fl">Equipamentos e valor por equipamento</label>
+        <div class="tw"><table><tr><th>Equipamento</th><th>Qtd.</th><th>Valor unitário (R$)</th></tr>${equipmentRows||'<tr><td colspan="3" style="color:var(--text2);">Nenhum equipamento vinculado ao evento.</td></tr>'}</table></div>
+      </div>
+      <div class="fg"><label class="fl">Observações dos serviços</label><textarea id="contractServiceNotes" class="fc" placeholder="Detalhes sobre serviços e equipamentos..."></textarea></div>
+      <div style="display:flex;justify-content:space-between;gap:8px;"><button type="button" class="btn btn-ghost" onclick="contractWizardPrevStep()">← Voltar</button><button type="button" class="btn btn-primary" onclick="contractWizardNextStep()">Continuar →</button></div>
+    </div>
+
+    <div id="contractStep3" style="display:none;">
+      <div class="card" style="margin-bottom:10px;"><div class="card-header"><span class="card-title">Despesas</span></div><div class="card-body" style="padding-top:8px;display:grid;gap:8px;">
+        <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;cursor:pointer;"><input id="contractEnableExpenses" type="checkbox" onchange="toggleContractExpensesFields()"> Incluir despesas no contrato (opcional)</label>
+        <div id="contractExpensesWrap" style="display:none;gap:8px;">
+        <div class="grid g3"><div class="fg"><label class="fl">Alimentação equipe</label><input id="contractExpenseFood" type="number" min="0" step="0.01" class="fc" placeholder="0"></div><div class="fg"><label class="fl">Responsável</label><select id="contractExpenseFoodResp" class="fc"><option value="empresa">empresa</option><option value="contratante">contratante</option><option value="reembolso">reembolso</option></select></div></div>
+        <div class="grid g3"><div class="fg"><label class="fl">Hospedagem</label><input id="contractExpenseHotel" type="number" min="0" step="0.01" class="fc" placeholder="0"></div><div class="fg"><label class="fl">Responsável</label><select id="contractExpenseHotelResp" class="fc"><option value="empresa">empresa</option><option value="contratante">contratante</option><option value="reembolso">reembolso</option></select></div></div>
+        <div class="grid g3"><div class="fg"><label class="fl">Transporte</label><input id="contractExpenseTransport" type="number" min="0" step="0.01" class="fc" placeholder="0"></div><div class="fg"><label class="fl">Responsável</label><select id="contractExpenseTransportResp" class="fc"><option value="empresa">empresa</option><option value="contratante">contratante</option><option value="reembolso">reembolso</option></select></div></div>
+        <div class="grid g3"><div class="fg"><label class="fl">Equipe</label><input id="contractExpenseTeam" type="number" min="0" step="0.01" class="fc" placeholder="0"></div><div class="fg"><label class="fl">Responsável</label><select id="contractExpenseTeamResp" class="fc"><option value="empresa">empresa</option><option value="contratante">contratante</option><option value="reembolso">reembolso</option></select></div></div>
+        <div class="grid g3"><div class="fg"><label class="fl">Outros (montagem)</label><input id="contractExpenseOther" type="number" min="0" step="0.01" class="fc" placeholder="0"></div><div class="fg"><label class="fl">Responsável</label><select id="contractExpenseOtherResp" class="fc"><option value="empresa">empresa</option><option value="contratante">contratante</option><option value="reembolso">reembolso</option></select></div></div>
+        </div>
+      </div></div>
+
+      <div class="card"><div class="card-header"><span class="card-title">Pagamento</span></div><div class="card-body" style="padding-top:8px;display:grid;gap:8px;">
+        <div class="grid g2"><div class="fg"><label class="fl">Valor total</label><input id="contractTotalValue" type="number" min="0" step="0.01" class="fc" value="${Number(ev?.value||0)}" oninput="updateContractSignalPreview()"></div><div class="fg"><label class="fl">Duração do Evento (horas)</label><input id="contractDuration" type="number" class="fc" value="${ev?'6':''}"></div></div>
+        <div class="grid g3"><div class="fg"><label class="fl">Sinal (%)</label><input id="contractSignalPct" type="number" min="0" max="100" step="1" class="fc" value="0" oninput="updateContractSignalPreview()"></div><div class="fg"><label class="fl">Data sinal</label><input id="contractSignalDue" type="date" class="fc" value="${new Date().toISOString().slice(0,10)}"></div><div class="fg"><label class="fl">Valor do sinal (R$)</label><input id="contractSignalValue" type="number" class="fc" readonly></div></div>
+        <div class="grid g2"><div class="fg"><label class="fl">Parcela final (R$)</label><input id="contractFinalValue" type="number" class="fc" readonly></div><div class="fg"><label class="fl">Forma de pagamento</label><select id="contractPayment" class="fc" onchange="toggleContractPaymentDetails()">${DB.paymentMethods.map(pm=>`<option value="${pm.id}">${esc(pm.name)}</option>`).join('')}</select></div></div>
+        <div id="contractPixSplitWrap" style="display:none;background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);padding:10px;margin-bottom:10px;">
+          <div style="font-size:12px;font-weight:700;margin-bottom:8px;">PIX (Entrada + Restante)</div>
+          <div class="grid g2">
+            <div class="fg"><label class="fl">Valor da Entrada (R$)</label><input id="contractEntryValue" type="number" min="0" step="0.01" class="fc" oninput="updateContractSplitRemainingFromEntry()"></div>
+            <div class="fg"><label class="fl">Data da Entrada</label><input id="contractEntryDue" type="date" class="fc"></div>
+          </div>
+          <div class="grid g2">
+            <div class="fg"><label class="fl">Valor do Restante (R$)</label><input id="contractRemainingValue" type="number" min="0" step="0.01" class="fc"></div>
+            <div class="fg"><label class="fl">Data do Restante</label><input id="contractRemainingDue" type="date" class="fc"></div>
+          </div>
+          <div style="font-size:11px;color:var(--text2);">Informe os valores e datas para gerar automaticamente as duas parcelas no financeiro.</div>
+        </div>
+      </div></div>
+
+      <div style="display:flex;justify-content:flex-start;gap:8px;"><button type="button" class="btn btn-ghost" onclick="contractWizardPrevStep()">← Voltar</button></div>
+    </div>
+
+    <p style="font-size:10.5px;color:var(--text3);margin-top:8px;">O contrato será gerado com base no modelo oficial da empresa.</p>`;
   },
     ok:createContract},
   addPaymentMethod:{title:'+ Nova Forma de Pagamento / Recebimento',body:`
