@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+N<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -816,6 +816,8 @@ let S = {
 const PASSWORD_MIN_LEN=8;
 const RESET_PASSWORD_ROUTE='/reset-password';
 const LOCAL_DATA_TS_KEY='eventpro_local_data_ts';
+const SYNC_WARN_COOLDOWN_MS=6000;
+let LAST_SYNC_WARN_AT=0;
 const PULL_REFRESH={
   installed:false,
   dragging:false,
@@ -839,6 +841,27 @@ function setLocalDataTs(ts){
 function getCloudSnapshotTs(snapshotResult){
   const ts=Number(snapshotResult?.data?.ts||0);
   return Number.isFinite(ts)&&ts>0?ts:0;
+}
+
+function toastSyncWarn(msg){
+  const now=Date.now();
+  if(now-LAST_SYNC_WARN_AT<SYNC_WARN_COOLDOWN_MS)return;
+  LAST_SYNC_WARN_AT=now;
+  toast(msg,'warn');
+}
+
+function countTenantRecords(dbAll,clistsAll,empresaId){
+  const eid=Number(empresaId||0);
+  if(!eid||!dbAll)return 0;
+  let total=0;
+  MT_TABLES.forEach(t=>{
+    total+=(dbAll[t]||[]).filter(r=>Number(r?.empresa_id||0)===eid).length;
+  });
+  total+=(dbAll?.finance?.rec||[]).filter(r=>Number(r?.empresa_id||0)===eid).length;
+  total+=(dbAll?.finance?.pay||[]).filter(r=>Number(r?.empresa_id||0)===eid).length;
+  const cls=(clistsAll&&clistsAll[String(eid)])||{};
+  Object.keys(cls).forEach(k=>{ total+=(cls[k]||[]).length; });
+  return total;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -900,7 +923,10 @@ async function ensureSupabaseAuthForLocalUser(user,password){
 
 function saveDB(){
   try{
-    if(!DB_ALL||!S.companyId)return;
+    if(!DB_ALL||!S.companyId){
+      toastSyncWarn('Não foi possível salvar agora: sessão da empresa não está pronta.');
+      return;
+    }
     const empresaId=Number(S.companyId);
 
     MT_TABLES.forEach(t=>{
@@ -928,9 +954,21 @@ function saveDB(){
     // Sync para nuvem (async, não bloqueia UI)
     if(window.EventProSupabase?.pushSnapshot){
       window.EventProSupabase.pushSnapshot(empresaId,DB_ALL,CLISTS_ALL)
-        .catch(e=>console.warn('Cloud sync push falhou (não crítico):',e));
+        .then(function(res){
+          if(res?.error){
+            console.warn('Cloud sync push falhou (não crítico):',res.error);
+            toastSyncWarn('Salvo localmente, mas não foi possível enviar para nuvem agora.');
+          }
+        })
+        .catch(function(e){
+          console.warn('Cloud sync push falhou (não crítico):',e);
+          toastSyncWarn('Salvo localmente, mas não foi possível enviar para nuvem agora.');
+        });
     }
-  }catch(e){console.error('Erro ao salvar:',e);}
+  }catch(e){
+    console.error('Erro ao salvar:',e);
+    toast('Falha ao salvar dados localmente.','err');
+  }
 }
 
 async function bootstrapSupabaseBridge(){
@@ -998,9 +1036,14 @@ async function syncCloudSnapshotOnBoot(options){
   }
   if(!result?.data?.db)return {updated:false,reason:'no-data'};
 
+  const cloudDBCandidate=normalizeMultiTenantStore(result.data.db);
+  const cloudClistsCandidate=result.data.clists?normalizeClistsStore(result.data.clists):null;
+  const localCount=countTenantRecords(DB_ALL,CLISTS_ALL,companyId);
+  const cloudCount=countTenantRecords(cloudDBCandidate,cloudClistsCandidate?{[String(companyId)]:cloudClistsCandidate[String(companyId)]||{}}:{},companyId);
+
   const localTs=getLocalDataTs();
   const cloudTs=getCloudSnapshotTs(result);
-  const shouldKeepLocal=(localTs>0)&&(cloudTs===0||cloudTs<localTs);
+  const shouldKeepLocal=(localTs>0&&localCount>0&&(cloudTs===0||cloudTs<localTs))||(localCount>0&&cloudCount===0);
   if(shouldKeepLocal){
     // Evita apagar alterações locais quando a nuvem está atrasada.
     if(window.EventProSupabase?.pushSnapshot){
@@ -1011,11 +1054,14 @@ async function syncCloudSnapshotOnBoot(options){
         console.warn('Cloud resync após detectar snapshot antigo falhou:',pushErr);
       }
     }
+    if(cloudCount===0&&localCount>0){
+      toastSyncWarn('Snapshot da nuvem veio vazio; mantivemos seus dados locais.');
+    }
     return {updated:false,reason:'cloud-stale-kept-local'};
   }
 
   try{
-    const cloudDB=normalizeMultiTenantStore(result.data.db);
+    const cloudDB=cloudDBCandidate;
     const localUsers=deepClone(DB_ALL.users||[]);
     DB_ALL=cloudDB;
     // Preserva segredos locais para manter login offline e first-access flow.
@@ -1356,13 +1402,11 @@ function loadDB(){
     // Persiste a versão normalizada para manter consistência entre sessões/tenants.
     localStorage.setItem('eventpro_db_all',JSON.stringify(DB_ALL));
     localStorage.setItem('eventpro_clists_all',JSON.stringify(CLISTS_ALL));
-    if(!getLocalDataTs())setLocalDataTs(Date.now());
 
     if(!Array.isArray(DB_ALL?.users)||!DB_ALL.users.length||!Array.isArray(DB_ALL?.companies)||!DB_ALL.companies.length){
       resetToDefaultStores();
       localStorage.setItem('eventpro_db_all',JSON.stringify(DB_ALL));
       localStorage.setItem('eventpro_clists_all',JSON.stringify(CLISTS_ALL));
-      setLocalDataTs(Date.now());
     }
 
     S.sidebarCollapsed=localStorage.getItem('eventpro_sidebar_collapsed')==='1';
@@ -1378,7 +1422,6 @@ function loadDB(){
     resetToDefaultStores();
     localStorage.setItem('eventpro_db_all',JSON.stringify(DB_ALL));
     localStorage.setItem('eventpro_clists_all',JSON.stringify(CLISTS_ALL));
-    setLocalDataTs(Date.now());
   }
 }
 
@@ -7011,9 +7054,13 @@ async function doLogin(){
         }
       }else{
         try{
+          const cloudDBCandidate=normalizeMultiTenantStore(firstPull.data.db);
+          const cloudClistsCandidate=firstPull.data.clists?normalizeClistsStore(firstPull.data.clists):null;
+          const localCount=countTenantRecords(DB_ALL,CLISTS_ALL,activeUser.empresa_id);
+          const cloudCount=countTenantRecords(cloudDBCandidate,cloudClistsCandidate?{[String(activeUser.empresa_id)]:cloudClistsCandidate[String(activeUser.empresa_id)]||{}}:{},activeUser.empresa_id);
           const localTs=getLocalDataTs();
           const cloudTs=getCloudSnapshotTs(firstPull);
-          const shouldKeepLocal=(localTs>0)&&(cloudTs===0||cloudTs<localTs);
+          const shouldKeepLocal=(localTs>0&&localCount>0&&(cloudTs===0||cloudTs<localTs))||(localCount>0&&cloudCount===0);
           if(shouldKeepLocal){
             if(window.EventProSupabase?.pushSnapshot){
               const keepLocalPush=await window.EventProSupabase.pushSnapshot(activeUser.empresa_id,DB_ALL,CLISTS_ALL);
@@ -7021,8 +7068,11 @@ async function doLogin(){
                 console.warn('Cloud push para preservar local mais novo falhou:',keepLocalPush.error);
               }
             }
+            if(cloudCount===0&&localCount>0){
+              toastSyncWarn('Snapshot da nuvem veio vazio; mantivemos seus dados locais.');
+            }
           }else{
-          const cloudDB=normalizeMultiTenantStore(firstPull.data.db);
+          const cloudDB=cloudDBCandidate;
           const localUsers=deepClone(DB_ALL.users||[]);
           DB_ALL=cloudDB;
           // Preserva senhas/flags locais — nunca sobrescrever com dado da nuvem.
