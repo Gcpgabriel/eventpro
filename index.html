@@ -45,7 +45,7 @@ body{font-family:var(--fb);background:var(--bg);color:var(--text);font-size:14px
 .avatar{width:30px;height:30px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;flex-shrink:0;}
 .user-name{font-size:12.5px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .user-role{font-size:10.5px;color:var(--text3);}
-.user-actions{position:relative;margin-left:auto;}
+.user-actions{position:relative;margin-left:auto;display:flex;align-items:center;}
 .user-menu-btn{width:28px;height:28px;border-radius:8px;border:1px solid var(--border2);background:transparent;color:var(--text2);cursor:pointer;font-size:18px;line-height:1;display:flex;align-items:center;justify-content:center;}
 .user-menu-btn:hover{background:var(--bg3);color:var(--text);}
 .user-menu{position:absolute;right:0;bottom:34px;min-width:210px;background:var(--bg2);border:1px solid var(--border2);border-radius:10px;box-shadow:0 10px 24px rgba(0,0,0,.35);padding:6px;z-index:20;}
@@ -559,11 +559,10 @@ const DB = {
   ],
   auditLogs:[],
   paymentMethods:[
-    {id:1,name:'PIX',description:'Transferência instantânea via PIX'},
-    {id:2,name:'Cartão',description:'Pagamento com cartão de crédito ou débito'},
-    {id:3,name:'PIX (Entrada + Restante)',description:'Entrada e saldo via PIX com datas definidas em contrato'},
-    {id:4,name:'TED',description:'Transferência bancária TED'},
-    {id:5,name:'BK',description:'Pagamento bancário BK'},
+    {id:1,name:'Pix - a vista (assinatura do contrato)',description:'Pagamento via Pix a vista no ato da assinatura do contrato'},
+    {id:2,name:'BK - Boleto 7 dias',description:'Pagamento via boleto BK com vencimento em 7 dias'},
+    {id:3,name:'Pix - entrada + restante (porcentagem variavel)',description:'Entrada na assinatura + restante na data do evento, com porcentagem configuravel'},
+    {id:4,name:'Cartao de credito (a vista)',description:'Pagamento com cartao de credito a vista'},
   ]
 };
 
@@ -589,11 +588,10 @@ const MT_TABLES=['events','equipment','clients','proposals','contracts','mainten
 const DEFAULT_END_CLIENT_NAME='Cliente Final';
 const DEFAULT_END_CLIENT_EMAIL='cliente.final@nao-informado.local';
 const DEFAULT_PAYMENT_METHODS=[
-  {name:'PIX',description:'Transferência instantânea via PIX'},
-  {name:'Cartão',description:'Pagamento com cartão de crédito ou débito'},
-  {name:'PIX (Entrada + Restante)',description:'Entrada e saldo via PIX com datas definidas em contrato'},
-  {name:'TED',description:'Transferência bancária TED'},
-  {name:'BK',description:'Pagamento bancário BK'},
+  {name:'Pix - a vista (assinatura do contrato)',description:'Pagamento via Pix a vista no ato da assinatura do contrato'},
+  {name:'BK - Boleto 7 dias',description:'Pagamento via boleto BK com vencimento em 7 dias'},
+  {name:'Pix - entrada + restante (porcentagem variavel)',description:'Entrada na assinatura + restante na data do evento, com porcentagem configuravel'},
+  {name:'Cartao de credito (a vista)',description:'Pagamento com cartao de credito a vista'},
 ];
 let DB_ALL=null;
 let CLISTS_ALL={};
@@ -695,6 +693,41 @@ function paymentMethodKey(name){
 
 function ensureDefaultPaymentMethodsForStore(store){
   store.paymentMethods=Array.isArray(store.paymentMethods)?store.paymentMethods:[];
+  const legacyAliases={
+    'pix':'pix - a vista (assinatura do contrato)',
+    'cartao':'cartao de credito (a vista)',
+    'cartão':'cartao de credito (a vista)',
+    'pix (entrada + restante)':'pix - entrada + restante (porcentagem variavel)',
+    'bk':'bk - boleto 7 dias',
+  };
+  const defaultByKey={};
+  DEFAULT_PAYMENT_METHODS.forEach(pm=>{defaultByKey[paymentMethodKey(pm.name)]=pm;});
+
+  // Migra nomes antigos para o novo padrao sem perder IDs/referencias.
+  store.paymentMethods=store.paymentMethods.map(pm=>{
+    const key=paymentMethodKey(pm?.name);
+    const aliasTarget=legacyAliases[key];
+    if(!aliasTarget)return pm;
+    const target=defaultByKey[paymentMethodKey(aliasTarget)];
+    if(!target)return pm;
+    return {
+      ...pm,
+      name:target.name,
+      description:target.description,
+    };
+  });
+
+  // Remove duplicados gerados por migracao/legacy, mantendo o menor id.
+  const dedupMap=new Map();
+  store.paymentMethods.forEach(pm=>{
+    const key=paymentMethodKey(pm?.name);
+    if(!key)return;
+    if(!dedupMap.has(key)||Number(pm?.id||0)<Number(dedupMap.get(key)?.id||0)){
+      dedupMap.set(key,pm);
+    }
+  });
+  store.paymentMethods=Array.from(dedupMap.values()).sort((a,b)=>Number(a.id||0)-Number(b.id||0));
+
   const existing=new Set(store.paymentMethods.map(pm=>paymentMethodKey(pm?.name)));
   let idCursor=store.paymentMethods.length?Math.max(...store.paymentMethods.map(pm=>Number(pm?.id||0))):0;
   DEFAULT_PAYMENT_METHODS.forEach((base)=>{
@@ -1601,6 +1634,9 @@ function toggleUserMenu(ev){
   S.userMenuOpen=!S.userMenuOpen;
   render();
 }
+function stopEvent(ev){
+  if(ev)ev.stopPropagation();
+}
 function userMenuAction(action){
   S.userMenuOpen=false;
   if(action==='logout'){logout();return;}
@@ -2441,7 +2477,7 @@ ${logoB64?`<img class="top-logo" src="${logoB64}" alt="${esc(co.name||'Empresa')
 
 <p class="total">Valor Total.......: R$ ${valorNum} (${valorExt})</p>
 
-<p class="obs"><span class="label">Obs.:</span> Todos itens com montagem e desmontagem, técnico e transporte por nossa conta. Validade da proposta: 10 dias.</p>
+<p class="obs"><span class="label">Obs.:</span> Todos itens com montagem e desmontagem, técnico e transporte por nossa conta. Validade da proposta: ${Number(p.validityDays||7)} dias.</p>
 
 <div class="sign">
   <div class="line"></div>
@@ -3597,6 +3633,8 @@ function addPaymentMethod(){
   const name=document.getElementById('pmName')?.value.trim();
   const description=document.getElementById('pmDescription')?.value.trim();
   if(!name){toast('Informe o nome da forma de pagamento.','err');return false;}
+  const exists=(DB.paymentMethods||[]).some(pm=>paymentMethodKey(pm?.name)===paymentMethodKey(name));
+  if(exists){toast('Esta forma de pagamento ja existe.','err');return false;}
   DB.paymentMethods.push({
     id:nextId(DB.paymentMethods),
     name,
@@ -4152,6 +4190,7 @@ function createProposal(){
   const date=document.getElementById('proposalDate')?.value;
   const endDate=document.getElementById('proposalEndDate')?.value||date;
   const time=document.getElementById('proposalTime')?.value||'19:00';
+  const validityDays=Number(document.getElementById('proposalValidityDays')?.value||7);
   const val=Number(document.getElementById('proposalValue')?.value||0);
   const checks=Array.from(document.querySelectorAll('#proposalEquipList input[data-eq-check="1"]:checked'));
   const consumableChecks=Array.from(document.querySelectorAll('#proposalEquipList input[data-cons-check="1"]:checked'));
@@ -4197,6 +4236,8 @@ function createProposal(){
     .map(v=>catMap[v])
     .filter(Boolean);
   const serviceCategories=[...new Set([...(selectedCategories||[]),...inferredCategories])];
+  const allowedValidity=[3,7,15,30];
+  const normalizedValidity=allowedValidity.includes(validityDays)?validityDays:7;
 
   if(!client||!event||!date||!endDate||val<=0){toast('Preencha cliente, evento, datas e valor.','err');return false;}
   if(equipIds.length===0&&consumablePlan.length===0){toast('Selecione ao menos um item (permanente ou consumível).','err');return false;}
@@ -4209,6 +4250,7 @@ function createProposal(){
     date,
     endDate,
     time,
+    validityDays:normalizedValidity,
     status:'pendente',
     items,
     serviceCategories,
@@ -4986,11 +5028,10 @@ function renderSidebar(){
   return`<div id="sidebar">
   <div class="sb-logo" onclick="toggleSidebar()" title="${S.sidebarCollapsed?'Expandir':'Recolher'} barra lateral"><div class="logo-icon">EP</div><div class="logo-name">EventPro</div><div class="logo-pro">${S.sidebarCollapsed?'▸':'◂'}</div></div>
   <nav class="sb-nav">${nav}</nav>
-  <div class="sb-footer"><div class="user-row">
+  <div class="sb-footer"><div class="user-row" onclick="toggleUserMenu(event)">
     <div class="avatar">${DB.user.initials}</div>
     <div style="flex:1;min-width:0;"><div class="user-name">${DB.user.name}</div><div class="user-role">${DB.user.role}</div></div>
-    <div class="user-actions" onclick="event.stopPropagation();">
-      <button class="user-menu-btn" onclick="toggleUserMenu(event)" title="Mais opções">⋯</button>
+    <div class="user-actions" onclick="stopEvent(event)">
       ${S.userMenuOpen?`<div class="user-menu">
         ${!isEmployee?`<button class="user-menu-item" onclick="userMenuAction('equipe')">👥 Equipe</button>`:''}
         ${!isEmployee?`<button class="user-menu-item" onclick="userMenuAction('categorias_estoque')">🗂 Categorias de estoque</button>`:''}
@@ -5413,6 +5454,7 @@ function syncEventFinalizationFromChecklist(eid){
 function getDashboardMetrics(){
   const today=new Date();
   const events=(DB.events||[]);
+  const totalEvents=events.length;
   const activeEvents=events.filter(e=>e.status!=='finalizado');
   const upcomingCandidates=activeEvents
     .map(e=>({event:e,date:parseISODateSafe(e.date)}))
@@ -5427,6 +5469,7 @@ function getDashboardMetrics(){
   const pay=(DB.finance?.pay||[]).map(p=>normalizeFinanceEntry(p,'pay'));
   const tRec=rec.filter(f=>f.status==='a_receber').reduce((a,b)=>a+Number(b.val||0),0);
   const tPay=pay.filter(f=>f.status==='a_pagar').reduce((a,b)=>a+Number(b.val||0),0);
+  const tRecTotal=rec.reduce((a,b)=>a+Number(b.val||0),0);
 
   const paidReceivables=rec.filter(f=>f.status==='recebido');
   const anchorDate=paidReceivables
@@ -5464,23 +5507,36 @@ function getDashboardMetrics(){
   );
 
   const maintenanceEquipments=(DB.equipment||[]).filter(eq=>eq.status==='manutenção').length;
+  const totalEquipments=(DB.equipment||[]).length;
 
   const npsVals=(DB.nps||[]).map(n=>Number(n.score)).filter(n=>Number.isFinite(n));
   const npsAvg=npsVals.length?(npsVals.reduce((a,b)=>a+b,0)/npsVals.length):null;
+  const npsCount=npsVals.length;
+
+  const activeEventsPct=totalEvents?Math.round((activeEvents.length/totalEvents)*100):0;
+  const receivablesPct=tRecTotal?Math.round((tRec/tRecTotal)*100):0;
+  const maintenancePct=totalEquipments?Math.round((maintenanceEquipments/totalEquipments)*100):0;
 
   const tRecReal=rec.filter(f=>f.status==='recebido').reduce((a,b)=>a+Number(b.val||0),0);
   const tPayReal=pay.filter(f=>f.status==='pago').reduce((a,b)=>a+Number(b.val||0),0);
 
   return{
     activeEventsCount:activeEvents.length,
+    totalEvents,
+    activeEventsPct,
     upcoming,
     tRec,
+    tRecTotal,
+    receivablesPct,
     tPay,
     revs,
     months:ms,
     pendingTasks,
     maintenanceEquipments,
+    totalEquipments,
+    maintenancePct,
     npsAvg,
+    npsCount,
     tRecReal,
     tPayReal,
   };
@@ -5501,6 +5557,7 @@ function pgDashboard(){
   const m=getDashboardMetrics();
   const mx=Math.max(...m.revs,1);
   const pending=m.pendingTasks.slice(0,4);
+  const isEmployee=currentRole()==='employee';
 
   return`
   <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
@@ -5510,20 +5567,21 @@ function pgDashboard(){
     </div>
     <button class="btn btn-primary" onclick="openM('addEvent')">+ Criar evento</button>
   </div>
-  <div class="grid g4" style="margin-bottom:14px;">
-    <div class="stat"><div class="stat-top"><div class="stat-ico" style="background:var(--glow)">📅</div><span class="stat-chg up">+12%</span></div><div class="stat-val">${m.activeEventsCount}</div><div class="stat-lbl">Eventos Ativos</div></div>
-    <div class="stat"><div class="stat-top"><div class="stat-ico" style="background:var(--gbg)">💰</div><span class="stat-chg up">+8%</span></div><div class="stat-val">R$ ${(m.tRec/1000).toFixed(1)}k</div><div class="stat-lbl">A Receber</div></div>
-    <div class="stat"><div class="stat-top"><div class="stat-ico" style="background:var(--abg)">📦</div><span class="stat-chg dn">-2</span></div><div class="stat-val">${m.maintenanceEquipments}</div><div class="stat-lbl">Equip. em Manutenção</div></div>
-    <div class="stat"><div class="stat-top"><div class="stat-ico" style="background:var(--bbg)">⭐</div><span class="stat-chg up">↑</span></div><div class="stat-val">${m.npsAvg===null?'-':m.npsAvg.toFixed(1)}</div><div class="stat-lbl">NPS Médio</div></div>
+  <div class="grid" style="grid-template-columns:${isEmployee?'1fr 1fr 1fr':'repeat(4,1fr)'};margin-bottom:14px;">
+    <div class="stat"><div class="stat-top"><div class="stat-ico" style="background:var(--glow)">📅</div><span class="stat-chg up">${m.activeEventsPct}%</span></div><div class="stat-val">${m.activeEventsCount}</div><div class="stat-lbl">Eventos Ativos (${m.totalEvents} no total)</div></div>
+    ${!isEmployee?`<div class="stat"><div class="stat-top"><div class="stat-ico" style="background:var(--gbg)">💰</div><span class="stat-chg ${m.receivablesPct>50?'dn':'up'}">${m.receivablesPct}%</span></div><div class="stat-val">R$ ${(m.tRec/1000).toFixed(1)}k</div><div class="stat-lbl">A Receber (de R$ ${(m.tRecTotal/1000).toFixed(1)}k)</div></div>`:''}
+    <div class="stat"><div class="stat-top"><div class="stat-ico" style="background:var(--abg)">📦</div><span class="stat-chg ${m.maintenancePct>0?'dn':'up'}">${m.maintenancePct}%</span></div><div class="stat-val">${m.maintenanceEquipments}</div><div class="stat-lbl">Equip. em Manutenção (${m.totalEquipments} no total)</div></div>
+    <div class="stat"><div class="stat-top"><div class="stat-ico" style="background:var(--bbg)">⭐</div><span class="stat-chg ${m.npsAvg!==null&&m.npsAvg>=8?'up':'dn'}">${m.npsCount} resp.</span></div><div class="stat-val">${m.npsAvg===null?'-':m.npsAvg.toFixed(1)}</div><div class="stat-lbl">NPS Médio</div></div>
   </div>
-  <div class="grid g2" style="margin-bottom:14px;">
+  <div class="grid" style="grid-template-columns:${isEmployee?'1fr':'1fr 1fr'};margin-bottom:14px;">
+    ${!isEmployee?`
     <div class="card"><div class="card-header"><span style="font-size:15px">📈</span><span class="card-title">Receita Mensal</span><span style="font-size:11px;color:var(--green);">${m.revs.length?`R$ ${(m.revs[m.revs.length-1]||0).toLocaleString('pt-BR')} em ${m.months[m.months.length-1]}`:'Sem dados'}</span></div>
     <div class="card-body">
       <div style="display:flex;align-items:flex-end;gap:6px;height:70px;margin-bottom:6px;">
         ${m.revs.map((v,i)=>`<div style="flex:1;display:flex;flex-direction:column;align-items:center;"><div style="flex:1;width:100%;background:${i===m.revs.length-1?'var(--accent)':'var(--glow)'};border-radius:3px 3px 0 0;min-height:${Math.round((v/mx)*100)}%;"></div></div>`).join('')}
       </div>
       <div style="display:flex;gap:6px;">${m.months.map((mm,i)=>`<div style="flex:1;text-align:center;font-size:9.5px;color:${i===m.months.length-1?'var(--accent2)':'var(--text3)'};">${mm}</div>`).join('')}</div>
-    </div></div>
+    </div></div>`:''}
     <div class="card"><div class="card-header"><span style="font-size:15px">📅</span><span class="card-title">Próximos Eventos</span><button class="btn btn-ghost btn-sm" onclick="nav('agenda')">Ver todos</button></div>
     <div class="card-body" style="padding-top:6px;">
       ${m.upcoming.map(e=>{
@@ -5532,12 +5590,13 @@ function pgDashboard(){
       }).join('')}
     </div></div>
   </div>
-  <div class="grid g2">
+  <div class="grid" style="grid-template-columns:${isEmployee?'1fr':'1fr 1fr'};">
     <div class="card"><div class="card-header"><span style="font-size:15px">✅</span><span class="card-title">Tarefas Pendentes</span></div>
     <div class="card-body" style="padding-top:6px;">
       ${pending.map(c=>`<div class="ci" onclick="openChecklistFromDashboard(${c.eid})"><div class="cb"></div><span style="font-size:12.5px;flex:1;">${c.task}</span></div>`).join('')}
       <button class="btn btn-ghost btn-sm" style="margin-top:8px;width:100%;" onclick="openChecklistFromDashboard(${S.selEv||0})">Ver checklist completo →</button>
     </div></div>
+    ${!isEmployee?`
     <div class="card"><div class="card-header"><span style="font-size:15px">💸</span><span class="card-title">Fluxo de Caixa</span><button class="btn btn-ghost btn-sm" onclick="nav('financeiro')">Detalhes</button></div>
     <div class="card-body">
       <div style="display:flex;flex-direction:column;gap:8px;">
@@ -5551,7 +5610,7 @@ function pgDashboard(){
           <div><div style="font-size:10.5px;color:var(--text2);margin-bottom:2px;">Saldo Atual</div><div style="font-family:var(--fh);font-size:17px;font-weight:700;color:var(--accent2);">${fmtVal(m.tRecReal-m.tPayReal)}</div></div><span style="font-size:20px;">◎</span>
         </div>
       </div>
-    </div></div>
+    </div></div>`:''}
   </div>`;
 }
 
@@ -6277,7 +6336,7 @@ function pgOrcamentos(){
       <td>${p.event}</td>
       <td style="max-width:160px;"><div style="display:flex;gap:3px;flex-wrap:wrap;">${p.items.map(i=>`<span class="badge b-gray">${i}</span>`).join('')}</div></td>
       <td style="font-weight:700;color:var(--green)">${fmtVal(p.val)}</td>
-      <td>${p.date}${p.endDate&&p.endDate!==p.date?` a ${p.endDate}`:''}</td>
+      <td>${p.date}${p.endDate&&p.endDate!==p.date?` a ${p.endDate}`:''}<div style="font-size:10.5px;color:var(--text3);">Validade: ${Number(p.validityDays||7)} dias</div></td>
       <td><div style="display:flex;align-items:center;gap:6px;"><span class="badge ${sc[p.status]}">${p.status}</span><select class="fc" style="width:118px;padding:5px 7px;font-size:11.5px;" onchange="updateProposalStatus(${p.id},this.value)"><option value="pendente" ${p.status==='pendente'?'selected':''}>pendente</option><option value="aprovado" ${p.status==='aprovado'?'selected':''}>aprovado</option><option value="rejeitado" ${p.status==='rejeitado'?'selected':''}>rejeitado</option><option value="alterar" ${p.status==='alterar'?'selected':''}>alterar</option></select></div></td>
       <td><div style="display:flex;gap:3px;align-items:center;"><button class="btn btn-ghost btn-sm" onclick="toast('Proposta aberta!')">👁</button><button class="btn btn-ghost btn-sm" onclick="generateProposalPDF(DB.proposals.find(pr=>pr.id===${p.id}))">📄</button><button class="btn btn-ghost btn-sm" onclick="shareProposal(${p.id})">📤</button><button class="btn btn-ghost btn-sm" onclick="softDeleteProposal(${p.id})" title="Excluir (soft delete)">🗑</button></div></td>
     </tr>`).join(''):`<tr><td colspan="7" style="padding:18px;text-align:center;color:var(--text2);">Nenhum registro em ${filterOptions.find(opt=>opt.id===activeFilter)?.label.toLowerCase()||'filtro'}.</td></tr>`}
@@ -6784,7 +6843,7 @@ const MODS={
     <div class="fg"><label class="fl">Cliente</label><select id="proposalClient" class="fc">${DB.clients.map(c=>`<option>${c.name}</option>`).join('')}</select></div>
     <div class="fg"><label class="fl">Evento</label><input id="proposalEvent" class="fc" placeholder="Nome ou tipo do evento"></div>
     <div class="grid g2"><div class="fg"><label class="fl">Data Inicial</label><input id="proposalDate" type="date" class="fc" onchange="updateProposalAvailabilityPreview()"></div><div class="fg"><label class="fl">Data Final</label><input id="proposalEndDate" type="date" class="fc" onchange="updateProposalAvailabilityPreview()"></div></div>
-    <div class="grid g2"><div class="fg"><label class="fl">Hora Inicial</label><input id="proposalTime" type="time" class="fc" value="19:00" onchange="updateProposalAvailabilityPreview()"></div><div class="fg"><label class="fl">Valor Total (R$)</label><input id="proposalValue" type="number" class="fc" placeholder="0"></div></div>
+    <div class="grid g3"><div class="fg"><label class="fl">Hora Inicial</label><input id="proposalTime" type="time" class="fc" value="19:00" onchange="updateProposalAvailabilityPreview()"></div><div class="fg"><label class="fl">Valor Total (R$)</label><input id="proposalValue" type="number" class="fc" placeholder="0"></div><div class="fg"><label class="fl">Tempo de validade do orçamento</label><select id="proposalValidityDays" class="fc"><option value="3">3 dias</option><option value="7" selected>7 dias</option><option value="15">15 dias</option><option value="30">30 dias</option></select></div></div>
     <div class="fg"><label class="fl">Categorias de Serviços</label>
       <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px;">
         ${['Som','Iluminação','Estrutura','Painel de LED','Gerador','Vídeo','DJ'].map(cat=>`<label style="display:flex;align-items:center;gap:5px;font-size:12.5px;cursor:pointer;"><input type="checkbox" name="proposalService" value="${cat}"> ${cat}</label>`).join('')}
