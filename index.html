@@ -7217,6 +7217,7 @@ async function doLogin(){
     render();
   }finally{
     S.authSyncing=false;
+    if(S.in)startRealtimeSync();
     if(!S.in)render();
   }
 }
@@ -7372,6 +7373,18 @@ window.addEventListener('popstate',()=>{
   render();
 });
 
+function startRealtimeSync(){
+  if(!S.in||!S.companyId)return;
+  if(!window.EventProSupabase?.subscribeToSnapshot)return;
+  window.EventProSupabase.subscribeToSnapshot(S.companyId,async function(payload){
+    // Ignora eventos que vieram do próprio dispositivo (mesmo updated_at que acabamos de enviar)
+    if(PULL_REFRESH.running||S.syncStatus.pending)return;
+    console.log('[Realtime] snapshot atualizado por outro dispositivo — aplicando...');
+    toast('☁️ Dados atualizados por outro dispositivo','ok');
+    await syncCloudSnapshotOnBoot({force:true});
+  });
+}
+
 (async function initApp(){
   loadDB();
   syncAuthRecoveryRouteFromLocation();
@@ -7379,6 +7392,7 @@ window.addEventListener('popstate',()=>{
   installPullToRefreshGesture();
   await bootstrapSupabaseBridge();
   await syncCloudSnapshotOnBoot();
+  startRealtimeSync();
 })();
 </script>
 </body>

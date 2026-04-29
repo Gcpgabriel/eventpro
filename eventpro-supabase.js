@@ -414,5 +414,39 @@
     pullSnapshot,
     pullSnapshotByUserEmail,
     healthCheck,
+    subscribeToSnapshot,
+    unsubscribeFromSnapshot,
   };
 })();
+
+let _realtimeChannel = null;
+
+function subscribeToSnapshot(empresaId, onUpdate) {
+  const client = window.EventProSupabase?.getClient?.();
+  if (!client || !empresaId) return;
+  // Cancela canal anterior se existir
+  if (_realtimeChannel) {
+    client.removeChannel(_realtimeChannel);
+    _realtimeChannel = null;
+  }
+  _realtimeChannel = client
+    .channel('snapshot-' + empresaId)
+    .on(
+      'postgres_changes',
+      { event: 'UPDATE', schema: 'public', table: 'company_snapshots', filter: 'empresa_id=eq.' + Number(empresaId) },
+      function(payload) {
+        if (typeof onUpdate === 'function') onUpdate(payload);
+      }
+    )
+    .subscribe(function(status) {
+      console.log('[Realtime] status:', status);
+    });
+}
+
+function unsubscribeFromSnapshot() {
+  const client = window.EventProSupabase?.getClient?.();
+  if (client && _realtimeChannel) {
+    client.removeChannel(_realtimeChannel);
+    _realtimeChannel = null;
+  }
+}
