@@ -1,4 +1,4 @@
-N<!DOCTYPE html>
+NO<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -229,16 +229,67 @@ textarea.fc{resize:vertical;min-height:72px;}
 .ev-card:hover{border-color:var(--accent);transform:translateY(-1px);}
 
 /* RESPONSIVE */
+.mob-menu-btn{display:none;width:34px;height:34px;border-radius:8px;border:1px solid var(--border2);background:transparent;color:var(--text2);font-size:18px;cursor:pointer;align-items:center;justify-content:center;flex-shrink:0;}
+.sb-backdrop{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:149;}
+
 @media(max-width:768px){
-  #sidebar{width:54px;min-width:54px;}
-  .logo-name,.logo-pro,.nav-item span:not(.nav-icon),.nav-badge,.user-name,.user-role,.nav-sec-label{display:none;}
-  .nav-item{justify-content:center;padding:10px;}
-  .sb-logo{justify-content:center;padding:14px 10px;}
-  #content{padding:12px;}
-  .g4,.g3{grid-template-columns:1fr 1fr;}
-  .g2{grid-template-columns:1fr;}
+  /* Sidebar como overlay */
+  #sidebar{
+    position:fixed;left:0;top:0;height:100%;z-index:150;
+    width:240px;min-width:240px;
+    transform:translateX(-100%);
+    transition:transform .25s;
+    box-shadow:4px 0 24px rgba(0,0,0,.45);
+  }
+  #sidebar.mob-open{transform:translateX(0);}
+  /* Mostra todos os itens da sidebar (não colapsa em mobile) */
+  #sidebar .logo-name,#sidebar .logo-pro,
+  #sidebar .nav-item span:not(.nav-icon),
+  #sidebar .nav-badge,#sidebar .user-name,
+  #sidebar .user-role,#sidebar .nav-sec-label{display:unset;}
+  #sidebar .nav-item{justify-content:flex-start;padding:7px 10px;}
+  #sidebar .sb-logo{justify-content:flex-start;padding:18px 16px 14px;}
+  #sidebar .user-row{cursor:pointer;pointer-events:all;}
+  #sidebar .user-actions{display:flex;}
+  /* Fundo escuro ao abrir sidebar */
+  .sb-backdrop.mob-open{display:block;}
+  /* Botão hambúrguer visível */
+  .mob-menu-btn{display:inline-flex;}
+  /* Content ocupa tudo */
+  #main{width:100%;}
+  #content{padding:12px 10px;}
+  /* Topbar */
   .topbar-title{font-size:14px;}
   .search-box{display:none;}
+  /* Grids */
+  .g4,.g3{grid-template-columns:1fr 1fr;}
+  .g2{grid-template-columns:1fr;}
+  /* Stat cards menores */
+  .stat{padding:11px 12px;}
+  .stat-val{font-size:20px;}
+  /* Tabelas: padding menor */
+  th{padding:7px 9px;font-size:10px;}
+  td{padding:9px 9px;font-size:12px;}
+  /* Cards */
+  .card-header{padding:11px 13px;}
+  .card-body{padding:11px 13px;}
+  /* Modal: quase fullscreen */
+  .modal-ov{padding:0;align-items:flex-end;}
+  .modal{border-radius:16px 16px 0 0;max-height:92vh;max-width:100%;}
+  /* Login card full-width */
+  .login-card{width:calc(100vw - 28px);padding:26px 20px;border-radius:16px;}
+  /* NPS dots */
+  .nps-d{width:29px;height:29px;font-size:11.5px;}
+  /* Day pills */
+  .day-pill{min-width:70px;padding:6px 8px;}
+  /* Botões nos forms: full width */
+  .modal-ft{flex-direction:column-reverse;gap:6px;}
+  .modal-ft .btn{width:100%;justify-content:center;}
+  /* Sync badge menor */
+  .sync-badge{font-size:10px;padding:2px 5px;}
+  /* Notif toast: full width */
+  #notifs{left:10px;right:10px;top:10px;}
+  .notif{max-width:100%;}
 }
 
 @keyframes pulseDot{
@@ -1528,6 +1579,7 @@ function nav(p){
     toast('Você não tem permissão para acessar esta seção.','err');
     return;
   }
+  toggleMobileSidebar(false);
   S.page=p;S.userMenuOpen=false;render();
 }
 function toggleSidebar(){
@@ -1535,6 +1587,14 @@ function toggleSidebar(){
   if(S.sidebarCollapsed)S.userMenuOpen=false;
   localStorage.setItem('eventpro_sidebar_collapsed',S.sidebarCollapsed?'1':'0');
   render();
+}
+function toggleMobileSidebar(forceState){
+  const sidebar=document.getElementById('sidebar');
+  const backdrop=document.querySelector('.sb-backdrop');
+  if(!sidebar)return;
+  const isOpen=typeof forceState==='boolean'?forceState:!sidebar.classList.contains('mob-open');
+  sidebar.classList.toggle('mob-open',isOpen);
+  if(backdrop)backdrop.classList.toggle('mob-open',isOpen);
 }
 function toggleUserMenu(ev){
   if(ev)ev.stopPropagation();
@@ -4971,6 +5031,7 @@ function renderTopbar(){
   let actions='';
   if(S.page==='agenda') actions=`<div class="tabs"><div class="tab${S.tabs.agenda==='lista'?' active':''}" onclick="S.tabs.agenda='lista';render()">Lista</div><div class="tab${S.tabs.agenda==='cal'?' active':''}" onclick="S.tabs.agenda='cal';render()">Calendário</div></div><button class="btn btn-primary btn-sm" onclick="openM('addEvent')">+ Evento</button>`;
   return`<div id="topbar">
+  <button class="mob-menu-btn" onclick="toggleMobileSidebar()" aria-label="Menu">☰</button>
   <div class="topbar-title">${TITLES[S.page]||'EventPro'}</div>
   <div class="search-box"><span>🔍</span><span>Buscar...</span></div>
   ${actions}
@@ -7402,6 +7463,7 @@ function render(){
   }
   const pg=(PAGES[S.page]||pgDashboard)();
   root.innerHTML=`<div id="app" class="${S.sidebarCollapsed?'sidebar-collapsed':''}">
+    <div class="sb-backdrop" onclick="toggleMobileSidebar(false)"></div>
     ${renderSidebar()}
     <div id="main">
       ${renderTopbar()}
