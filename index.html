@@ -1726,6 +1726,21 @@ function contractWizardGoToStep(step){
     if(panel)panel.style.display=n===next?'block':'none';
     if(badge)badge.style.opacity=n===next?'1':'.45';
   });
+  updateContractWizardControls();
+}
+
+function getCurrentContractWizardStep(){
+  return [1,2,3].find(n=>document.getElementById(`contractStep${n}`)?.style.display!=='none')||1;
+}
+
+function updateContractWizardControls(){
+  const step=getCurrentContractWizardStep();
+  const backBtn=document.getElementById('contractWizardBack');
+  const nextBtn=document.getElementById('contractWizardNext');
+  const finishBtn=document.getElementById('contractWizardFinish');
+  if(backBtn)backBtn.style.display=step>1?'inline-flex':'none';
+  if(nextBtn)nextBtn.style.display=step<3?'inline-flex':'none';
+  if(finishBtn)finishBtn.style.display=step===3?'inline-flex':'none';
 }
 
 function contractWizardNextStep(){
@@ -7130,7 +7145,6 @@ const MODS={
         <div class="tw"><table><tr><th>Equipamento</th><th>Qtd.</th><th>Valor unitário (R$)</th></tr>${equipmentRows||'<tr><td colspan="3" style="color:var(--text2);">Nenhum equipamento vinculado ao evento.</td></tr>'}</table></div>
       </div>
       <div class="fg"><label class="fl">Observações dos serviços</label><textarea id="contractServiceNotes" class="fc" placeholder="Detalhes sobre serviços e equipamentos..."></textarea></div>
-      <div style="display:flex;justify-content:space-between;gap:8px;"><button type="button" class="btn btn-ghost" onclick="contractWizardPrevStep()">← Voltar</button><button type="button" class="btn btn-primary" onclick="contractWizardNextStep()">Continuar →</button></div>
     </div>
 
     <div id="contractStep3" style="display:none;">
@@ -7162,8 +7176,6 @@ const MODS={
           <div style="font-size:11px;color:var(--text2);">Informe os valores e datas para gerar automaticamente as duas parcelas no financeiro.</div>
         </div>
       </div></div>
-
-      <div style="display:flex;justify-content:flex-start;gap:8px;"><button type="button" class="btn btn-ghost" onclick="contractWizardPrevStep()">← Voltar</button></div>
     </div>
 
     <p style="font-size:10.5px;color:var(--text3);margin-top:8px;">O contrato será gerado com base no modelo oficial da empresa.</p>`;
@@ -7263,6 +7275,9 @@ function renderModal(){
   const locked=S.modal==='companyOnboarding'&&shouldForceCompanyOnboarding();
   const onboardingStep=Number(S.companyOnboarding?.step||1);
   const onboardingFooter=locked?`${onboardingStep>1?`<button class="btn btn-ghost" onclick="goCompanyOnboardingStep(${onboardingStep-1})">Voltar</button>`:'<span style="font-size:11px;color:var(--text3);">Etapa ${onboardingStep} de 3</span>'}<button class="btn btn-primary" onclick="${onboardingStep<3?`goCompanyOnboardingStep(${onboardingStep+1})`:`if(MODS['companyOnboarding'].ok()!==false)closeM()`}">${onboardingStep<3?'Continuar':'Concluir'}</button>`:'';
+  const contractWizardFooter=S.modal==='newContract'
+    ?`<button class="btn btn-ghost" onclick="closeM()">Cancelar</button><button id="contractWizardBack" class="btn btn-ghost" onclick="contractWizardPrevStep()" style="display:none;">Voltar</button><button id="contractWizardNext" class="btn btn-primary" onclick="contractWizardNextStep()">Avançar</button><button id="contractWizardFinish" class="btn btn-primary" onclick="if(MODS['newContract'].ok()!==false)closeM()" style="display:none;">Finalizar</button>`
+    :'';
   if(S.modal==='newProposal')setTimeout(updateProposalAvailabilityPreview,0);
   if(S.modal==='addClient')setTimeout(onClientTypeChange,0);
   if(S.modal==='editClient')setTimeout(onEditClientTypeChange,0);
@@ -7271,7 +7286,7 @@ function renderModal(){
   <div class="modal">
     <div class="modal-hd"><span class="modal-title">${title}</span>${locked?'':`<button class="btn btn-ghost btn-icon" onclick="closeM()" style="font-size:19px;border:none;line-height:1;">×</button>`}</div>
     <div class="modal-bd">${body}</div>
-    <div class="modal-ft">${locked?onboardingFooter:`<button class="btn btn-ghost" onclick="closeM()">Cancelar</button><button class="btn btn-primary" onclick="if(MODS['${S.modal}'].ok()!==false)closeM()">Salvar</button>`}</div>
+    <div class="modal-ft">${locked?onboardingFooter:(S.modal==='newContract'?contractWizardFooter:`<button class="btn btn-ghost" onclick="closeM()">Cancelar</button><button class="btn btn-primary" onclick="if(MODS['${S.modal}'].ok()!==false)closeM()">Salvar</button>`)}</div>
   </div></div>`;
 }
 
