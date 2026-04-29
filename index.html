@@ -815,6 +815,7 @@ let S = {
 
 const PASSWORD_MIN_LEN=8;
 const RESET_PASSWORD_ROUTE='/reset-password';
+const LOCAL_DATA_TS_KEY='eventpro_local_data_ts';
 const PULL_REFRESH={
   installed:false,
   dragging:false,
@@ -824,6 +825,21 @@ const PULL_REFRESH={
   startX:0,
   distance:0,
 };
+
+function getLocalDataTs(){
+  const ts=Number(localStorage.getItem(LOCAL_DATA_TS_KEY)||0);
+  return Number.isFinite(ts)&&ts>0?ts:0;
+}
+
+function setLocalDataTs(ts){
+  const n=Number(ts);
+  localStorage.setItem(LOCAL_DATA_TS_KEY,String(Number.isFinite(n)&&n>0?n:Date.now()));
+}
+
+function getCloudSnapshotTs(snapshotResult){
+  const ts=Number(snapshotResult?.data?.ts||0);
+  return Number.isFinite(ts)&&ts>0?ts:0;
+}
 
 // ═══════════════════════════════════════════════════════════
 // CRYPTO / HASH
@@ -907,6 +923,7 @@ function saveDB(){
     localStorage.setItem('eventpro_clists_all',JSON.stringify(CLISTS_ALL));
     localStorage.setItem('eventpro_db',JSON.stringify(DB));
     localStorage.setItem('eventpro_clists',JSON.stringify(clists));
+    setLocalDataTs(Date.now());
     if(S.currentUser?.id)localStorage.setItem('eventpro_session_user',String(S.currentUser.id));
     // Sync para nuvem (async, não bloqueia UI)
     if(window.EventProSupabase?.pushSnapshot){
@@ -981,6 +998,22 @@ async function syncCloudSnapshotOnBoot(options){
   }
   if(!result?.data?.db)return {updated:false,reason:'no-data'};
 
+  const localTs=getLocalDataTs();
+  const cloudTs=getCloudSnapshotTs(result);
+  const shouldKeepLocal=(localTs>0)&&(cloudTs===0||cloudTs<localTs);
+  if(shouldKeepLocal){
+    // Evita apagar alterações locais quando a nuvem está atrasada.
+    if(window.EventProSupabase?.pushSnapshot){
+      try{
+        const pushRes=await window.EventProSupabase.pushSnapshot(companyId,DB_ALL,CLISTS_ALL);
+        if(pushRes?.error)console.warn('Cloud resync após detectar snapshot antigo falhou:',pushRes.error);
+      }catch(pushErr){
+        console.warn('Cloud resync após detectar snapshot antigo falhou:',pushErr);
+      }
+    }
+    return {updated:false,reason:'cloud-stale-kept-local'};
+  }
+
   try{
     const cloudDB=normalizeMultiTenantStore(result.data.db);
     const localUsers=deepClone(DB_ALL.users||[]);
@@ -1001,6 +1034,7 @@ async function syncCloudSnapshotOnBoot(options){
     }
 
     localStorage.setItem('eventpro_db_all',JSON.stringify(DB_ALL));
+    setLocalDataTs(cloudTs||Date.now());
     const freshUser=DB_ALL.users.find(function(u){ return Number(u.id)===Number(S.currentUser?.id); })||S.currentUser;
     applyTenantScope(freshUser);
     if(opts.skipRender!==true)render();
@@ -1322,11 +1356,13 @@ function loadDB(){
     // Persiste a versão normalizada para manter consistência entre sessões/tenants.
     localStorage.setItem('eventpro_db_all',JSON.stringify(DB_ALL));
     localStorage.setItem('eventpro_clists_all',JSON.stringify(CLISTS_ALL));
+    if(!getLocalDataTs())setLocalDataTs(Date.now());
 
     if(!Array.isArray(DB_ALL?.users)||!DB_ALL.users.length||!Array.isArray(DB_ALL?.companies)||!DB_ALL.companies.length){
       resetToDefaultStores();
       localStorage.setItem('eventpro_db_all',JSON.stringify(DB_ALL));
       localStorage.setItem('eventpro_clists_all',JSON.stringify(CLISTS_ALL));
+      setLocalDataTs(Date.now());
     }
 
     S.sidebarCollapsed=localStorage.getItem('eventpro_sidebar_collapsed')==='1';
@@ -1342,6 +1378,7 @@ function loadDB(){
     resetToDefaultStores();
     localStorage.setItem('eventpro_db_all',JSON.stringify(DB_ALL));
     localStorage.setItem('eventpro_clists_all',JSON.stringify(CLISTS_ALL));
+    setLocalDataTs(Date.now());
   }
 }
 
@@ -6815,6 +6852,7 @@ async function doLogin(){
           }
           localStorage.setItem('eventpro_db_all',JSON.stringify(DB_ALL));
           localStorage.setItem('eventpro_clists_all',JSON.stringify(CLISTS_ALL));
+          setLocalDataTs(Number(byEmail?.data?.ts||Date.now()));
           hydrated=true;
         }
       }
@@ -6833,6 +6871,7 @@ async function doLogin(){
             }
             localStorage.setItem('eventpro_db_all',JSON.stringify(DB_ALL));
             localStorage.setItem('eventpro_clists_all',JSON.stringify(CLISTS_ALL));
+            setLocalDataTs(Number(snap?.data?.ts||Date.now()));
             hydrated=true;
           }
         }
@@ -6972,6 +7011,17 @@ async function doLogin(){
         }
       }else{
         try{
+          const localTs=getLocalDataTs();
+          const cloudTs=getCloudSnapshotTs(firstPull);
+          const shouldKeepLocal=(localTs>0)&&(cloudTs===0||cloudTs<localTs);
+          if(shouldKeepLocal){
+            if(window.EventProSupabase?.pushSnapshot){
+              const keepLocalPush=await window.EventProSupabase.pushSnapshot(activeUser.empresa_id,DB_ALL,CLISTS_ALL);
+              if(keepLocalPush?.error){
+                console.warn('Cloud push para preservar local mais novo falhou:',keepLocalPush.error);
+              }
+            }
+          }else{
           const cloudDB=normalizeMultiTenantStore(firstPull.data.db);
           const localUsers=deepClone(DB_ALL.users||[]);
           DB_ALL=cloudDB;
@@ -6989,8 +7039,10 @@ async function doLogin(){
             localStorage.setItem('eventpro_clists_all',JSON.stringify(CLISTS_ALL));
           }
           localStorage.setItem('eventpro_db_all',JSON.stringify(DB_ALL));
+          setLocalDataTs(cloudTs||Date.now());
           activeUser=DB_ALL.users.find(function(u){ return Number(u.id)===Number(candidate.id); })||candidate;
           console.log('Primeiro sync do login concluído com sucesso.');
+          }
         }catch(syncErr){
           console.warn('Erro ao aplicar snapshot da nuvem no primeiro login:',syncErr);
           toast('Não foi possível aplicar os dados da nuvem no login.','err');
