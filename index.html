@@ -7130,6 +7130,16 @@ async function doLogin(){
       if(ensured?.created){
         toast('Login na nuvem criado automaticamente para este usuário.','ok');
       }
+      // Garante que company_id está no user_metadata do JWT (corrige usuários antigos)
+      if(window.EventProSupabase.updateUserMetadata&&candidate.empresa_id){
+        const session=await window.EventProSupabase.refreshSession();
+        const jwtMeta=session?.user?.user_metadata||{};
+        const jwtCompanyId=Number(jwtMeta?.company_id||session?.user?.app_metadata?.company_id||0);
+        if(!jwtCompanyId||jwtCompanyId!==Number(candidate.empresa_id)){
+          await window.EventProSupabase.updateUserMetadata({ company_id:Number(candidate.empresa_id) });
+          console.log('[Auth] company_id gravado no user_metadata:',candidate.empresa_id);
+        }
+      }
     }
 
     let activeUser=candidate;
@@ -7307,11 +7317,22 @@ async function registerEmpresa(){
   applyTenantScope(newAdmin);
   saveDB();
 
-  if(window.EventProSupabase?.pushSnapshot){
-    const seed=await window.EventProSupabase.pushSnapshot(newEmpresaId,DB_ALL,CLISTS_ALL);
-    if(seed?.error){
-      console.warn('Falha ao semear snapshot da nova empresa:',seed.error);
-      toast('Conta criada, mas o sync em nuvem falhou neste momento.','warn');
+  if(window.EventProSupabase){
+    // 1. Grava company_id no user_metadata do JWT para que RLS funcione
+    if(window.EventProSupabase.updateUserMetadata){
+      const metaRes=await window.EventProSupabase.updateUserMetadata({ company_id:newEmpresaId });
+      if(metaRes?.error){
+        console.warn('Falha ao gravar company_id no metadata Supabase:',metaRes.error);
+        toast('Conta criada, mas não foi possível vincular company_id ao login. Sync pode falhar.','warn');
+      }
+    }
+    // 2. Envia snapshot inicial agora que JWT tem company_id
+    if(window.EventProSupabase.pushSnapshot){
+      const seed=await window.EventProSupabase.pushSnapshot(newEmpresaId,DB_ALL,CLISTS_ALL);
+      if(seed?.error){
+        console.warn('Falha ao semear snapshot da nova empresa:',seed.error);
+        toast('Conta criada, mas o sync em nuvem falhou neste momento.','warn');
+      }
     }
   }
 

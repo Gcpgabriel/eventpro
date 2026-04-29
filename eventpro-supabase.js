@@ -207,6 +207,17 @@
     }
   }
 
+  async function updateUserMetadata(metadataFields){
+    const client = getClient();
+    if(!client)return { data:null, error:wrapError(new Error('Supabase indisponível no navegador.')) };
+    try{
+      const result = await client.auth.updateUser({ data: metadataFields });
+      return result?.error ? { data:null, error:wrapError(result.error) } : result;
+    }catch(error){
+      return { data:null, error:wrapError(error) };
+    }
+  }
+
   async function updateUserPassword(newPassword){
     const client = getClient();
     if(!client)return { data:null, error:wrapError(new Error('Supabase indisponível no navegador.')) };
@@ -416,6 +427,7 @@
     healthCheck,
     subscribeToSnapshot,
     unsubscribeFromSnapshot,
+    updateUserMetadata,
   };
 })();
 
