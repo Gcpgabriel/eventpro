@@ -180,6 +180,12 @@ textarea.fc{resize:vertical;min-height:72px;}
 .notif{background:var(--bg2);border:1px solid var(--border2);border-radius:var(--r);padding:10px 14px;font-size:12.5px;display:flex;align-items:center;gap:9px;transform:translateX(120%);transition:transform .3s;pointer-events:all;max-width:280px;}
 .notif.show{transform:translateX(0);}
 
+/* PULL TO REFRESH */
+#pull-refresh-indicator{position:fixed;left:50%;top:8px;transform:translate(-50%,-140%);transition:transform .2s ease,opacity .2s ease;background:var(--bg2);border:1px solid var(--border2);border-radius:999px;padding:6px 12px;font-size:11.5px;color:var(--text2);z-index:220;pointer-events:none;opacity:0;}
+#pull-refresh-indicator.show{transform:translate(-50%,0);opacity:1;}
+#pull-refresh-indicator.ready{border-color:var(--accent);color:var(--accent2);}
+#pull-refresh-indicator.loading{border-color:var(--green);color:var(--green);}
+
 /* CALENDAR */
 .cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;}
 .cal-d{aspect-ratio:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;padding:3px 2px;border-radius:var(--r);font-size:11px;cursor:pointer;transition:background .15s;position:relative;}
@@ -234,6 +240,7 @@ textarea.fc{resize:vertical;min-height:72px;}
 <body>
 <div id="notifs"></div>
 <div id="root"></div>
+<div id="pull-refresh-indicator" aria-live="polite">Puxe para atualizar</div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="./eventpro-supabase.js"></script>
@@ -801,6 +808,15 @@ let S = {
 
 const PASSWORD_MIN_LEN=8;
 const RESET_PASSWORD_ROUTE='/reset-password';
+const PULL_REFRESH={
+  installed:false,
+  dragging:false,
+  armed:false,
+  running:false,
+  startY:0,
+  startX:0,
+  distance:0,
+};
 
 // ═══════════════════════════════════════════════════════════
 // CRYPTO / HASH
@@ -911,6 +927,170 @@ async function bootstrapSupabaseBridge(){
     }
     render();
   }
+}
+
+function updatePullRefreshIndicator(opts){
+  const o=opts||{};
+  const indicator=document.getElementById('pull-refresh-indicator');
+  if(!indicator)return;
+  const show=Boolean(o.show);
+  const ready=Boolean(o.ready);
+  const loading=Boolean(o.loading);
+  indicator.classList.toggle('show',show);
+  indicator.classList.toggle('ready',ready);
+  indicator.classList.toggle('loading',loading);
+  indicator.textContent=o.text||'Puxe para atualizar';
+}
+
+function resetPullRefreshUI(){
+  const content=document.getElementById('content');
+  if(content){
+    content.style.transition='transform .2s ease';
+    content.style.transform='translateY(0px)';
+    setTimeout(function(){
+      content.style.transition='';
+    },220);
+  }
+  updatePullRefreshIndicator({show:false,text:'Puxe para atualizar'});
+  PULL_REFRESH.distance=0;
+  PULL_REFRESH.armed=false;
+}
+
+async function syncCloudSnapshotOnBoot(options){
+  const opts=options||{};
+  if(!window.EventProSupabase?.pullSnapshot)return {updated:false,reason:'no-client'};
+  if(!S.in||!S.currentUser)return {updated:false,reason:'no-user'};
+
+  const session=await window.EventProSupabase.refreshSession();
+  if(!session)return {updated:false,reason:'no-session'};
+
+  const companyId=Number(S.companyId||S.currentUser?.empresa_id||0);
+  if(!companyId)return {updated:false,reason:'no-company'};
+
+  const result=await window.EventProSupabase.pullSnapshot(companyId);
+  if(result?.error){
+    console.warn('Cloud sync pull falhou:',result.error);
+    return {updated:false,reason:'pull-error',error:result.error};
+  }
+  if(!result?.data?.db)return {updated:false,reason:'no-data'};
+
+  try{
+    const cloudDB=normalizeMultiTenantStore(result.data.db);
+    const localUsers=deepClone(DB_ALL.users||[]);
+    DB_ALL=cloudDB;
+    // Preserva segredos locais para manter login offline e first-access flow.
+    DB_ALL.users=DB_ALL.users.map(function(cu){
+      const lu=localUsers.find(function(u){ return Number(u.id)===Number(cu.id); });
+      return lu?Object.assign({},cu,{
+        passwordHash:lu.passwordHash||cu.passwordHash,
+        password:lu.password||cu.password,
+        mustResetPassword:lu.mustResetPassword!=null?lu.mustResetPassword:cu.mustResetPassword,
+      }):cu;
+    });
+
+    if(result.data.clists){
+      CLISTS_ALL=normalizeClistsStore(result.data.clists);
+      localStorage.setItem('eventpro_clists_all',JSON.stringify(CLISTS_ALL));
+    }
+
+    localStorage.setItem('eventpro_db_all',JSON.stringify(DB_ALL));
+    const freshUser=DB_ALL.users.find(function(u){ return Number(u.id)===Number(S.currentUser?.id); })||S.currentUser;
+    applyTenantScope(freshUser);
+    if(opts.skipRender!==true)render();
+    console.log('Cloud sync concluído com sucesso.');
+    return {updated:true,reason:'ok'};
+  }catch(syncErr){
+    console.warn('Erro ao aplicar snapshot da nuvem:',syncErr);
+    return {updated:false,reason:'apply-error',error:syncErr};
+  }
+}
+
+async function runPullRefreshSync(){
+  if(PULL_REFRESH.running)return;
+  PULL_REFRESH.running=true;
+  updatePullRefreshIndicator({show:true,loading:true,text:'Atualizando dados...'});
+  try{
+    const status=await syncCloudSnapshotOnBoot();
+    if(status?.updated){
+      toast('Dados atualizados com sucesso.','ok');
+    }else if(status?.reason==='no-session'){
+      toast('Sessão da nuvem expirada. Faça login novamente.','warn');
+    }else if(status?.reason!=='no-data'){
+      toast('Não foi possível atualizar os dados agora.','warn');
+    }
+  }catch(error){
+    console.warn('Pull-to-refresh falhou:',error);
+    toast('Falha ao atualizar dados da nuvem.','err');
+  }finally{
+    PULL_REFRESH.running=false;
+    resetPullRefreshUI();
+  }
+}
+
+function installPullToRefreshGesture(){
+  if(PULL_REFRESH.installed)return;
+  PULL_REFRESH.installed=true;
+  const TRIGGER_DISTANCE=72;
+  const MAX_DISTANCE=120;
+
+  document.addEventListener('touchstart',function(ev){
+    if(!S.in||S.modal||PULL_REFRESH.running)return;
+    if(ev.touches.length!==1)return;
+    const content=document.getElementById('content');
+    if(!content||content.scrollTop>0)return;
+    const touch=ev.touches[0];
+    PULL_REFRESH.dragging=true;
+    PULL_REFRESH.armed=false;
+    PULL_REFRESH.startY=touch.clientY;
+    PULL_REFRESH.startX=touch.clientX;
+    PULL_REFRESH.distance=0;
+  },{passive:true});
+
+  document.addEventListener('touchmove',function(ev){
+    if(!PULL_REFRESH.dragging)return;
+    const content=document.getElementById('content');
+    if(!content){
+      PULL_REFRESH.dragging=false;
+      return;
+    }
+    const touch=ev.touches[0];
+    const dy=touch.clientY-PULL_REFRESH.startY;
+    const dx=touch.clientX-PULL_REFRESH.startX;
+    if(Math.abs(dx)>Math.abs(dy)||dy<=0||content.scrollTop>0){
+      PULL_REFRESH.dragging=false;
+      resetPullRefreshUI();
+      return;
+    }
+
+    const distance=Math.min(MAX_DISTANCE,dy*0.45);
+    PULL_REFRESH.distance=distance;
+    PULL_REFRESH.armed=distance>=TRIGGER_DISTANCE;
+    ev.preventDefault();
+    content.style.transition='none';
+    content.style.transform=`translateY(${distance}px)`;
+    updatePullRefreshIndicator({
+      show:true,
+      ready:PULL_REFRESH.armed,
+      text:PULL_REFRESH.armed?'Solte para atualizar':'Puxe para atualizar',
+    });
+  },{passive:false});
+
+  document.addEventListener('touchend',function(){
+    if(!PULL_REFRESH.dragging)return;
+    const shouldSync=PULL_REFRESH.armed;
+    PULL_REFRESH.dragging=false;
+    if(shouldSync){
+      void runPullRefreshSync();
+    }else{
+      resetPullRefreshUI();
+    }
+  },{passive:true});
+
+  document.addEventListener('touchcancel',function(){
+    if(!PULL_REFRESH.dragging)return;
+    PULL_REFRESH.dragging=false;
+    resetPullRefreshUI();
+  },{passive:true});
 }
 
 function isResetPasswordRoute(){
@@ -6892,15 +7072,20 @@ self.addEventListener('fetch',e=>e.respondWith(caches.match(e.request).then(r=>r
 <!--update-->
 
 // Init
-loadDB();
 window.addEventListener('eventpro:supabase-auth',handleSupabaseAuthEvent);
 window.addEventListener('popstate',()=>{
   syncAuthRecoveryRouteFromLocation();
   render();
 });
-syncAuthRecoveryRouteFromLocation();
-render();
-bootstrapSupabaseBridge();
+
+(async function initApp(){
+  loadDB();
+  syncAuthRecoveryRouteFromLocation();
+  render();
+  installPullToRefreshGesture();
+  await bootstrapSupabaseBridge();
+  await syncCloudSnapshotOnBoot();
+})();
 </script>
 </body>
 </html>
