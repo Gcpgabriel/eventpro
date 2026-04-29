@@ -235,6 +235,12 @@ textarea.fc{resize:vertical;min-height:72px;}
   .topbar-title{font-size:14px;}
   .search-box{display:none;}
 }
+
+@keyframes pulseDot{
+  0%{opacity:.35;transform:scale(.8);}
+  50%{opacity:1;transform:scale(1);}
+  100%{opacity:.35;transform:scale(.8);}
+}
 </style>
 </head>
 <body>
@@ -790,6 +796,7 @@ let S = {
   currentUser:null,
   companyId:null,
   loginView:'login',
+  authSyncing:false,
   authRecovery:{
     requestLoading:false,
     requestMessage:'',
@@ -6675,6 +6682,20 @@ function renderModal(){
 // LOGIN
 // ═══════════════════════════════════════════════════════════
 function renderLogin(){
+  if(S.authSyncing){
+    return`<div class="login-wrap"><div class="login-card">
+  <div class="login-logo">
+    <div class="login-ico">EP</div>
+    <div style="font-family:var(--fh);font-size:22px;font-weight:800;">Sincronizando</div>
+    <div style="color:var(--text2);font-size:13px;margin-top:4px;">Carregando dados da empresa na nuvem...</div>
+  </div>
+  <div style="display:flex;justify-content:center;align-items:center;gap:10px;padding:8px 0 2px;">
+    <div style="width:10px;height:10px;border-radius:50%;background:var(--accent);animation:pulseDot 1s infinite;"></div>
+    <span style="font-size:12.5px;color:var(--text2);">Aguarde alguns segundos</span>
+  </div>
+  </div></div>`;
+  }
+
   if(S.loginView==='forgot-password'){
     const loading=S.authRecovery.requestLoading;
     const helper=S.authRecovery.requestMessage
@@ -6768,6 +6789,8 @@ async function doLogin(){
   }
 
   let candidate=(DB_ALL?.users||[]).find(u=>String(u.email).toLowerCase()===email);
+  S.authSyncing=true;
+  render();
 
   try{
     // Fallback cloud-first: em navegador novo pode não existir usuário local ainda.
@@ -6779,10 +6802,12 @@ async function doLogin(){
       }
 
       let hydrated=false;
+      let cloudPullFailed=false;
       if(window.EventProSupabase.pullSnapshotByUserEmail){
         const byEmail=await window.EventProSupabase.pullSnapshotByUserEmail(email);
         if(byEmail?.error){
           console.warn('Fallback cloud pull por e-mail falhou:',byEmail.error);
+          cloudPullFailed=true;
         }else if(byEmail?.data?.db){
           DB_ALL=normalizeMultiTenantStore(byEmail.data.db);
           if(byEmail?.data?.clists){
@@ -6798,7 +6823,10 @@ async function doLogin(){
         const fallbackCompanyId=Number(remoteLogin?.data?.user?.user_metadata?.company_id||0);
         if(fallbackCompanyId>0){
           const snap=await window.EventProSupabase.pullSnapshot(fallbackCompanyId);
-          if(!snap?.error&&snap?.data?.db){
+          if(snap?.error){
+            console.warn('Fallback cloud pull por company_id falhou:',snap.error);
+            cloudPullFailed=true;
+          }else if(snap?.data?.db){
             DB_ALL=normalizeMultiTenantStore(snap.data.db);
             if(snap?.data?.clists){
               CLISTS_ALL=normalizeClistsStore(snap.data.clists);
@@ -6812,8 +6840,67 @@ async function doLogin(){
 
       candidate=(DB_ALL?.users||[]).find(u=>String(u.email).toLowerCase()===email);
       if(!candidate){
-        toast('Login na nuvem confirmado, mas não encontramos os dados da empresa neste dispositivo. Faça login no dispositivo original para forçar uma sincronização e tente novamente.','err');
-        return;
+        if(cloudPullFailed){
+          toast('Login na nuvem confirmado, mas houve falha ao sincronizar os dados da empresa. Tente novamente em instantes.','err');
+          return;
+        }
+
+        const authUser=remoteLogin?.data?.user||null;
+        const meta=authUser?.user_metadata||{};
+        const fallbackCompanyId=Number(meta?.company_id||authUser?.app_metadata?.company_id||0);
+        if(!fallbackCompanyId){
+          toast('Login na nuvem confirmado, mas seu usuário não possui company_id no Supabase. Atualize o metadata e tente novamente.','err');
+          return;
+        }
+
+        DB_ALL=normalizeMultiTenantStore(DB_ALL||deepClone(DB));
+        DB_ALL.companies=DB_ALL.companies||[];
+        DB_ALL.users=DB_ALL.users||[];
+
+        let company=(DB_ALL.companies||[]).find(c=>Number(c.id)===fallbackCompanyId);
+        if(!company){
+          company={
+            id:fallbackCompanyId,
+            name:String(meta?.company_name||'Minha Empresa').trim()||'Minha Empresa',
+            owner:String(meta?.full_name||authUser?.email||'Admin').trim(),
+            cnpj:'',
+            city:'',
+            address:'',
+            phone:'',
+            email:String(authUser?.email||'').trim().toLowerCase(),
+            specialties:'',
+          };
+          DB_ALL.companies.push(company);
+        }
+
+        const role=roleNorm(meta?.role||'admin');
+        const existing=(DB_ALL.users||[]).find(u=>String(u.email||'').toLowerCase()===email&&Number(u.empresa_id||0)===fallbackCompanyId);
+        if(existing){
+          candidate=existing;
+        }else{
+          const newUser={
+            id:nextId(DB_ALL.users||[{id:0}]),
+            name:String(meta?.full_name||authUser?.email||email).trim(),
+            email,
+            role,
+            empresa_id:fallbackCompanyId,
+            initials:initialsFromName(String(meta?.full_name||authUser?.email||email)),
+            passwordHash:await hashPassword(pass),
+            mustResetPassword:false,
+          };
+          DB_ALL.users.push(newUser);
+          candidate=newUser;
+        }
+
+        MT_TABLES.forEach(t=>{DB_ALL[t]=DB_ALL[t]||[];});
+        if(!DB_ALL.finance)DB_ALL.finance={rec:[],pay:[]};
+        ensureDefaultEndClientForCompanyInStore(DB_ALL,fallbackCompanyId);
+        CLISTS_ALL=normalizeClistsStore(CLISTS_ALL||{});
+        CLISTS_ALL[String(fallbackCompanyId)]=CLISTS_ALL[String(fallbackCompanyId)]||{};
+
+        localStorage.setItem('eventpro_db_all',JSON.stringify(DB_ALL));
+        localStorage.setItem('eventpro_clists_all',JSON.stringify(CLISTS_ALL));
+        toast('Login na nuvem confirmado. Dados base da empresa foram inicializados neste dispositivo.','ok');
       }
     }
 
@@ -6865,33 +6952,30 @@ async function doLogin(){
       }
     }
 
-    applyTenantScope(candidate);
-    S.in=true;
-    S.page='dashboard';
-    localStorage.setItem('eventpro_session_user',String(candidate.id));
-    toast(`Bem-vindo ao EventPro, ${candidate.name.split(' ')[0]}! 👋`);
-    render();
-    // Carrega dados da nuvem em background somente com sessão autenticada
+    let activeUser=candidate;
     if(cloudSessionReady&&window.EventProSupabase?.pullSnapshot){
-      window.EventProSupabase.pullSnapshot(candidate.empresa_id).then(function(result){
-        if(result?.error){
-          console.warn('Cloud sync pull retornou erro:',result.error);
-          return;
-        }
-        if(!result?.data?.db){
-          // Primeira sincronização: publica snapshot local para os demais dispositivos.
-          if(window.EventProSupabase?.pushSnapshot){
-            window.EventProSupabase.pushSnapshot(candidate.empresa_id,DB_ALL,CLISTS_ALL)
-              .then(function(res){ if(res?.error)console.warn('Cloud sync seed falhou:',res.error); })
-              .catch(function(e){ console.warn('Cloud sync seed falhou:',e); });
+      const firstPull=await window.EventProSupabase.pullSnapshot(activeUser.empresa_id);
+      if(firstPull?.error){
+        console.warn('Primeiro cloud pull no login falhou:',firstPull.error);
+        toast('Não foi possível sincronizar os dados da empresa agora. Tente novamente em instantes.','err');
+        return;
+      }
+
+      if(!firstPull?.data?.db){
+        // Sem snapshot na nuvem: semeia com os dados locais atuais.
+        if(window.EventProSupabase?.pushSnapshot){
+          const seed=await window.EventProSupabase.pushSnapshot(activeUser.empresa_id,DB_ALL,CLISTS_ALL);
+          if(seed?.error){
+            console.warn('Cloud sync seed no login falhou:',seed.error);
+            toast('Login concluído, mas não foi possível publicar o snapshot inicial.','warn');
           }
-          return;
         }
+      }else{
         try{
-          const cloudDB=normalizeMultiTenantStore(result.data.db);
+          const cloudDB=normalizeMultiTenantStore(firstPull.data.db);
           const localUsers=deepClone(DB_ALL.users||[]);
           DB_ALL=cloudDB;
-          // Preserva senhas/flags locais — nunca sobrescrever com dado da nuvem
+          // Preserva senhas/flags locais — nunca sobrescrever com dado da nuvem.
           DB_ALL.users=DB_ALL.users.map(function(cu){
             const lu=localUsers.find(function(u){ return Number(u.id)===Number(cu.id); });
             return lu?Object.assign({},cu,{
@@ -6900,20 +6984,27 @@ async function doLogin(){
               mustResetPassword:lu.mustResetPassword!=null?lu.mustResetPassword:cu.mustResetPassword,
             }):cu;
           });
-          if(result.data.clists){
-            CLISTS_ALL=normalizeClistsStore(result.data.clists);
+          if(firstPull.data.clists){
+            CLISTS_ALL=normalizeClistsStore(firstPull.data.clists);
             localStorage.setItem('eventpro_clists_all',JSON.stringify(CLISTS_ALL));
           }
           localStorage.setItem('eventpro_db_all',JSON.stringify(DB_ALL));
-          const freshUser=DB_ALL.users.find(function(u){ return Number(u.id)===Number(candidate.id); })||candidate;
-          applyTenantScope(freshUser);
-          render();
-          console.log('Dados sincronizados da nuvem com sucesso.');
+          activeUser=DB_ALL.users.find(function(u){ return Number(u.id)===Number(candidate.id); })||candidate;
+          console.log('Primeiro sync do login concluído com sucesso.');
         }catch(syncErr){
-          console.warn('Erro ao aplicar snapshot da nuvem:',syncErr);
+          console.warn('Erro ao aplicar snapshot da nuvem no primeiro login:',syncErr);
+          toast('Não foi possível aplicar os dados da nuvem no login.','err');
+          return;
         }
-      }).catch(function(e){ console.warn('Cloud sync pull falhou (não crítico):',e); });
+      }
     }
+
+    applyTenantScope(activeUser);
+    S.in=true;
+    S.page='dashboard';
+    localStorage.setItem('eventpro_session_user',String(activeUser.id));
+    toast(`Bem-vindo ao EventPro, ${activeUser.name.split(' ')[0]}! 👋`);
+    render();
   }catch(err){
     console.error('Erro no login:',err);
     toast('Falha ao entrar. Os dados locais foram restaurados; tente novamente.','err');
@@ -6924,6 +7015,9 @@ async function doLogin(){
     S.in=false;
     S.page='login';
     render();
+  }finally{
+    S.authSyncing=false;
+    if(!S.in)render();
   }
 }
 
