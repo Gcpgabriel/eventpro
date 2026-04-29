@@ -6380,9 +6380,9 @@ async function addSystemUser(){
   const newId=nextId(DB_ALL.users||[{id:0}]);
   const newUser={id:newId,name:nome,email,role:roleNorm(finalRole),empresa_id:compId,initials:initialsFromName(nome),passwordHash:pwdHash,mustResetPassword:true};
   DB_ALL.users.push(newUser);
-  localStorage.setItem('eventpro_db_all',JSON.stringify(DB_ALL));
   document.getElementById('sysUserModal')?.remove();
   toast(`Usuário ${nome.split(' ')[0]} criado com sucesso! 👤`,'ok');
+  saveDB(); // persiste localmente e sincroniza com a nuvem
   render();
 }
 
@@ -6394,8 +6394,8 @@ function removeSystemUser(userId){
   if(roleNorm(user.role)==='admin'){toast('Não é possível remover um administrador.','err');return;}
   if(!confirm(`Remover usuário "${user.name}"? Esta ação não pode ser desfeita.`))return;
   DB_ALL.users=DB_ALL.users.filter(u=>Number(u.id)!==Number(userId));
-  localStorage.setItem('eventpro_db_all',JSON.stringify(DB_ALL));
   toast(`Usuário ${user.name.split(' ')[0]} removido.`,'ok');
+  saveDB();
   render();
 }
 
@@ -7156,16 +7156,17 @@ async function doLogin(){
     if(window.EventProSupabase){
       const ensured=await ensureSupabaseAuthForLocalUser(candidate,pass);
       if(ensured?.error||!ensured?.session){
-        console.warn('Login/provisionamento Supabase falhou:',ensured?.error||'sem sessão');
-        toast('Não foi possível autenticar no Supabase para este usuário. Use recuperação de senha do email da conta e tente novamente.','err');
-        return;
-      }
-      cloudSessionReady=true;
-      if(ensured?.created){
-        toast('Login na nuvem criado automaticamente para este usuário.','ok');
+        console.warn('Login/provisionamento Supabase falhou (seguindo com dados locais):',ensured?.error||'sem sessão');
+        toast('Sincronização com a nuvem indisponível. Login com dados locais.','warn');
+        // Não bloqueia login — segue com dados locais
+      }else{
+        cloudSessionReady=true;
+        if(ensured?.created){
+          toast('Login na nuvem criado automaticamente para este usuário.','ok');
+        }
       }
       // Garante que company_id está no user_metadata do JWT (corrige usuários antigos)
-      if(window.EventProSupabase.updateUserMetadata&&candidate.empresa_id){
+      if(cloudSessionReady&&window.EventProSupabase.updateUserMetadata&&candidate.empresa_id){
         const session=await window.EventProSupabase.refreshSession();
         const jwtMeta=session?.user?.user_metadata||{};
         const jwtCompanyId=Number(jwtMeta?.company_id||session?.user?.app_metadata?.company_id||0);
@@ -7180,10 +7181,10 @@ async function doLogin(){
     if(cloudSessionReady&&window.EventProSupabase?.pullSnapshot){
       const firstPull=await window.EventProSupabase.pullSnapshot(activeUser.empresa_id);
       if(firstPull?.error){
-        console.warn('Primeiro cloud pull no login falhou:',firstPull.error);
-        toast('Não foi possível sincronizar os dados da empresa agora. Tente novamente em instantes.','err');
-        return;
-      }
+        console.warn('Primeiro cloud pull no login falhou (seguindo com dados locais):',firstPull.error);
+        toast('Não foi possível sincronizar com a nuvem. Usando dados locais.','warn');
+        // Não bloqueia login
+      }else
 
       if(!firstPull?.data?.db){
         // Sem snapshot na nuvem: semeia com os dados locais atuais.
@@ -7236,9 +7237,9 @@ async function doLogin(){
           console.log('Primeiro sync do login concluído com sucesso.');
           }
         }catch(syncErr){
-          console.warn('Erro ao aplicar snapshot da nuvem no primeiro login:',syncErr);
-          toast('Não foi possível aplicar os dados da nuvem no login.','err');
-          return;
+          console.warn('Erro ao aplicar snapshot da nuvem no primeiro login (seguindo com dados locais):',syncErr);
+          toast('Não foi possível aplicar os dados da nuvem. Usando dados locais.','warn');
+          // Não bloqueia login
         }
       }
     }
